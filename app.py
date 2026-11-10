@@ -1,650 +1,583 @@
-
 import os
-import csv
-import io
 import sqlite3
-import secrets
-from datetime import datetime
 from functools import wraps
-
-from flask import (
-    Flask, request, redirect, url_for, session,
-    flash, render_template_string, send_file, abort
-)
+from datetime import date, datetime
+from flask import Flask, g, request, redirect, url_for, session, flash, render_template_string, get_flashed_messages
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("ALZZZ_SECRET", secrets.token_hex(32))
-app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "alzzz.db"))
+UPLOAD_DIR = os.path.join(BASE_DIR, "static_uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-DB = "alzzz.db"
-UPLOAD = "static_uploads"
-os.makedirs(UPLOAD, exist_ok=True)
+app = Flask(__name__)
+app.secret_key = os.environ.get("ALZZZ_SECRET")
+if not app.secret_key:
+    raise RuntimeError("ALZZZ_SECRET belum diatur.")
+
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
 def db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
+    if "db" not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+@app.teardown_appcontext
+def close_db(_error):
+    conn = g.pop("db", None)
+    if conn is not None:
+        conn.close()
 
 def init_db():
-    with db() as c:
-        c.executescript("""
-        CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT DEFAULT 'member',
-            photo TEXT DEFAULT ''
-        );
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        display_name TEXT NOT NULL,
+        photo TEXT,
+        bio TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        category TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        entry_date TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        symbol TEXT NOT NULL,
+        plan TEXT,
+        result TEXT,
+        notes TEXT,
+        entry_date TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    
+    # --- KODE ANTI HILANG DATA: Otomatis tambah kolom bio jika belum ada ---
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
+    except sqlite3.OperationalError:
+        pass # Abaikan jika kolom bio sudah ada
+    # ----------------------------------------------------------------------
 
-        CREATE TABLE IF NOT EXISTS transactions(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            amount REAL NOT NULL,
-            category TEXT NOT NULL,
-            note TEXT DEFAULT '',
-            date TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS trades(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            asset TEXT NOT NULL,
-            position TEXT NOT NULL,
-            entry REAL DEFAULT 0,
-            exit_price REAL DEFAULT 0,
-            result REAL DEFAULT 0,
-            note TEXT DEFAULT '',
-            date TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS evaluations(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            month TEXT NOT NULL,
-            criticism TEXT DEFAULT '',
-            suggestion TEXT DEFAULT '',
-            UNIQUE(user_id, month),
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-        """)
-
-        # Buat admin pertama melalui environment variable.
-        admin_name = os.environ.get("ADMIN_USER")
-        admin_pass = os.environ.get("ADMIN_PASSWORD")
-        if admin_name and admin_pass:
-            exists = c.execute(
-                "SELECT id FROM users WHERE username=?", (admin_name,)
-            ).fetchone()
-            if not exists:
-                c.execute(
-                    "INSERT INTO users(username,password,role) VALUES(?,?,?)",
-                    (admin_name, generate_password_hash(admin_pass), "admin")
-                )
+    conn.commit()
+    conn.close()
 
 init_db()
 
-def login_required(f):
-    @wraps(f)
+def current_user():
+    if "user_id" not in session:
+        return None
+    return db().execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
+
+def login_required(fn):
+    @wraps(fn)
     def wrapper(*args, **kwargs):
-        if "uid" not in session:
+        if not current_user():
             return redirect(url_for("login"))
-        return f(*args, **kwargs)
+        return fn(*args, **kwargs)
     return wrapper
 
-def admin_required(f):
-    @wraps(f)
+def admin_required(fn):
+    @wraps(fn)
     def wrapper(*args, **kwargs):
-        if session.get("role") != "admin":
-            abort(403)
-        return f(*args, **kwargs)
+        user = current_user()
+        if not user:
+            return redirect(url_for("login"))
+        if user["role"] != "admin":
+            flash("Halaman ini khusus admin.")
+            return redirect(url_for("dashboard"))
+        return fn(*args, **kwargs)
     return wrapper
 
-def money(n):
-    return "Rp " + format(int(n), ",").replace(",", ".")
+def auto_evaluate(plan, result, notes):
+    plan = plan or ""
+    result = result or ""
+    notes = notes or ""
+    score = 0
+    feedback = []
+    
+    if len(plan) < 10:
+        feedback.append("Rencana trading terlalu singkat, kurang terstruktur.")
+    else:
+        score += 20
+        
+    result_lower = result.lower()
+    if "profit" in result_lower or "tp" in result_lower:
+        score += 40
+        feedback.append("Hasil positif, pertahankan manajemen risiko.")
+    elif "loss" in result_lower or "sl" in result_lower:
+        score += 20
+        feedback.append("Mengalami kerugian. Evaluasi apakah Stop Loss terlalu ketat.")
+        
+    if len(notes) > 20:
+        score += 20
+        feedback.append("Catatan evaluasi bagus, kesadaran diri tinggi.")
+    else:
+        feedback.append("Catatan evaluasi kurang mendalam, coba tuliskan pelajaran yang didapat.")
+        
+    if score >= 60:
+        verdict = "SANGAT BAIK: Eksekusi trading kamu terukur dan penuh perhitungan."
+    elif score >= 30:
+        verdict = "CUKUP BAIK: Ada beberapa area yang perlu diperbaiki, terutama kedisiplinan."
+    else:
+        verdict = "PERLU PERBAIKAN: Trading terkesan emosional. Fokus pada rencana dan risk management."
+        
+    return f"{verdict} " + " ".join(feedback)
 
-BASE = """
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
+TEMPLATE = r"""
+<!doctype html><html lang="id"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AlZzz Web</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<title>{{ title }} • AlZzz Web</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
-:root{--bg:#060611;--panel:#101024;--panel2:#17172f;--cyan:#24eaff;--purple:#a855f7;--pink:#ff42c8;--green:#20f5a5;--red:#ff4f86;--gold:#ffd166;--text:#f4f2ff;--muted:#9da4c2;--line:#34345f}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Arial,sans-serif;background:radial-gradient(ellipse at 12% 0%,#48207855,transparent 34%),radial-gradient(ellipse at 92% 12%,#075b8750,transparent 32%),linear-gradient(145deg,#05050d,#0a0b1d 52%,#10091c);background-attachment:fixed}
-body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:.22;background-image:linear-gradient(#8b5cf615 1px,transparent 1px),linear-gradient(90deg,#8b5cf615 1px,transparent 1px);background-size:34px 34px}
-a,button{cursor:pointer;text-decoration:none;color:inherit}header{position:sticky;top:0;z-index:50;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:16px max(18px,calc((100% - 1220px)/2));background:#080817eF;border-bottom:1px solid #7541a866;backdrop-filter:blur(18px);box-shadow:0 8px 35px #0008}
-.logo{font-family:Orbitron,Inter,sans-serif;font-size:clamp(20px,3vw,29px);font-weight:800;letter-spacing:1px;background:linear-gradient(90deg,var(--cyan),#9d6bff,var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px #00eaff55)}nav{display:flex;gap:8px;flex-wrap:wrap}nav a,.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 13px;border:1px solid #484276;border-radius:11px;background:linear-gradient(145deg,#1b1b39,#11152b);font-size:13px;font-weight:700;transition:.22s}nav a:hover,.btn:hover{border-color:var(--cyan);box-shadow:0 0 18px #00dfff55;transform:translateY(-2px);color:white}
-main{width:min(1220px,100%);margin:auto;padding:24px 20px 36px}.card{position:relative;overflow:hidden;background:linear-gradient(145deg,#17172fef,#0d1023f5);border:1px solid #45406d;border-radius:19px;padding:21px;margin-bottom:17px;box-shadow:0 12px 34px #0004,inset 0 0 25px #a855f70a;transition:transform .22s,border-color .22s,box-shadow .22s}.card:after{content:"";position:absolute;top:0;left:8%;right:8%;height:1px;background:linear-gradient(90deg,transparent,#8b5cf7aa,transparent)}.card:hover{border-color:#5d9dbb;box-shadow:0 12px 34px #0005,0 0 22px #8b5cf722}h2,h3{margin-top:0;color:var(--cyan);font-family:Orbitron,Inter,sans-serif;letter-spacing:.3px}h2{font-size:clamp(19px,3vw,26px)}h3{font-size:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:15px}.stat{font-family:Orbitron,Inter,sans-serif;font-size:clamp(22px,3vw,29px);font-weight:800;margin-top:12px;text-shadow:0 0 15px currentColor}.green{color:var(--green)}.red{color:var(--pink)}.muted{color:var(--muted);font-size:13px;line-height:1.6}
-input,select,textarea{display:block;width:100%;padding:13px 14px;margin:7px 0 14px;border-radius:11px;background:#090b1b;color:white;border:1px solid #48436e;outline:none;font:inherit}input:focus,select:focus,textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #00eaff18,0 0 15px #00eaff22}button,.submit{border:1px solid #a36cff;border-radius:11px;color:white;padding:12px 18px;font-weight:800;background:linear-gradient(105deg,#6326bb,#087eae,#a52ac7);background-size:200% 100%;box-shadow:0 5px 18px #8b38ff33;transition:.2s}button:hover,.submit:hover{background-position:100% 0;box-shadow:0 0 22px #00eaff66;transform:translateY(-2px)}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:12px 11px;border-bottom:1px solid #30304f;text-align:left}th{color:var(--cyan);background:#211b3a;font-family:Orbitron,Inter,sans-serif;font-size:11px;letter-spacing:.4px}td{background:#111329}tr:hover td{background:#1b1a38}.table-wrap{overflow-x:auto;border-radius:12px}.alert{padding:13px 15px;background:#142b43;border:1px solid #287b9b;border-radius:12px;margin:10px 0 16px;box-shadow:0 0 16px #00dfff16}.quote{font-style:italic;color:#e2c8ff;line-height:1.7}.profile{width:65px;height:65px;object-fit:cover;border-radius:50%;border:2px solid var(--cyan);box-shadow:0 0 18px #00dfff77}footer{text-align:center;padding:28px;color:var(--muted);font-size:12px;letter-spacing:1px;border-top:1px solid #30264c}form.inline{display:inline}
-.hero{display:grid;grid-template-columns:1.5fr .8fr;gap:18px;align-items:center;min-height:190px;background:radial-gradient(circle at 85% 20%,#792bd744,transparent 34%),linear-gradient(120deg,#171735,#10162b 65%,#211137);border-color:#7250a5}.hero-title{font-family:Orbitron,Inter,sans-serif;font-size:clamp(23px,4vw,36px);font-weight:800;line-height:1.25;background:linear-gradient(90deg,#fff,var(--cyan),#c99aff);-webkit-background-clip:text;background-clip:text;color:transparent}.hero-side{padding:17px;border:1px solid #6d4a9b;border-radius:16px;background:#090b1c88;text-align:center}.eyebrow{font-size:10px;letter-spacing:2px;color:#c2a4ff;font-weight:800}.quick-links{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.quick-links a{padding:13px 9px;text-align:center;border:1px solid #46406c;border-radius:13px;background:#15152d;font-size:12px;font-weight:700}.quick-links a:hover{border-color:var(--cyan);box-shadow:0 0 16px #00dfff33}.progress{height:9px;background:#292743;border-radius:20px;overflow:hidden;margin-top:10px}.progress span{display:block;height:100%;border-radius:20px;background:linear-gradient(90deg,var(--cyan),var(--purple),var(--pink));box-shadow:0 0 12px #a855f7}.stat-card{min-height:118px}.stat-label{font-size:12px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase}.chart-grid{display:grid;grid-template-columns:1.5fr .8fr;gap:16px}.chart-box{min-width:0;min-height:260px}.chart-box canvas{max-height:300px}.section-label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.section-label small{color:var(--muted)}
-@media(max-width:720px){header{position:relative;padding:14px}nav{width:100%;flex-wrap:nowrap;overflow-x:auto;padding:3px 1px 8px;scrollbar-width:thin}nav a{white-space:nowrap;flex:0 0 auto;font-size:12px}main{padding:14px 12px 28px}.hero{grid-template-columns:1fr}.hero-side{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card{padding:16px;border-radius:16px;margin-bottom:12px}.stat{font-size:20px}.chart-grid{grid-template-columns:1fr}.quick-links{grid-template-columns:repeat(2,1fr)}th,td{padding:10px 8px;white-space:nowrap}}
-@media(max-width:370px){.grid{grid-template-columns:1fr}.logo{font-size:20px}}
+:root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif}
+header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative}
+.logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
+.hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
+.menu-dropdown{display:none;position:absolute;top:60px;right:5%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:100;box-shadow:0 10px 30px #0008;min-width:200px}
+.menu-dropdown a{display:block;padding:10px;color:var(--text);text-decoration:none;border-radius:8px}
+.menu-dropdown a:hover{background:#243454;color:var(--cyan)}
+main{max-width:1050px;margin:28px auto;padding:0 16px}
+h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
+input,select,textarea,button{font:inherit;border-radius:9px;padding:11px;width:100%;margin:6px 0;background:#0a1020;color:var(--text);border:1px solid #344665}
+textarea{min-height:85px}button{background:linear-gradient(90deg,#087e9a,#673b91);border:0;font-weight:bold;cursor:pointer}button:hover{filter:brightness(1.2)}
+label{display:block;color:var(--muted);margin-top:8px}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--cyan)}
+.msg{padding:10px;background:#17334a;border-radius:8px;margin-bottom:12px}.muted{color:var(--muted)}
+.avatar-container{position:relative;display:inline-block}
+.avatar{width:80px;height:80px;object-fit:cover;border-radius:50%;border:2px solid var(--cyan)}
+.edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:25px;height:25px;display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;cursor:pointer;text-decoration:none}
+.edit-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;width:auto;margin:0}
+.btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
+footer{text-align:center;color:var(--muted);padding:30px}
 
-/* ===== ALZZZ LOGIN CENTER ===== */
-
-body:has(input[type="password"]) main {
-    width: min(92%, 460px);
-    max-width: 460px;
-    min-height: calc(100svh - 180px);
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+/* ANIMASI LAMPU NEON WARNA WARNI PADA KOTAK */
+.panel, .stat {
+    background: #11182bee;
+    border: 2px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 16px;
+    animation: neon-glow 4s linear infinite;
 }
-
-body:has(input[type="password"]) main > * {
-    width: 100%;
-    max-width: 460px;
-    margin-left: auto !important;
-    margin-right: auto !important;
+@keyframes neon-glow {
+    0%, 100% { box-shadow: 0 0 10px #42e8ff, inset 0 0 5px #42e8ff; border-color: #42e8ff; }
+    25% { box-shadow: 0 0 10px #ff4fd8, inset 0 0 5px #ff4fd8; border-color: #ff4fd8; }
+    50% { box-shadow: 0 0 10px #00ff88, inset 0 0 5px #00ff88; border-color: #00ff88; }
+    75% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; border-color: #ffeb3b; }
 }
-
-body:has(input[type="password"]) main .card {
-    width: 100%;
-    max-width: 460px;
-    padding: 25px;
-    border-radius: 22px;
-    text-align: center;
-    box-shadow: 0 0 30px #00dfff22,
-                0 0 50px #a855ff22;
-}
-
-body:has(input[type="password"]) input,
-body:has(input[type="password"]) button {
-    width: 100%;
-}
-
-body:has(input[type="password"]) main h2 {
-    text-align: center;
-    color: #00eaff;
-    letter-spacing: 2px;
-    margin-bottom: 25px;
-}
-
-@media(max-width: 480px) {
-    body:has(input[type="password"]) main {
-        width: 92%;
-        min-height: calc(100svh - 150px);
-    }
-}
-
-</style>
-</head>
-<body>
+</style></head><body>
 <header>
- <div class="logo"> AlZzz Web</div>
- {% if user %}
- <nav>
-  <a href="/">Dashboard</a>
-  <a href="/transactions">Keuangan</a>
-  <a href="/trading">Trading</a>
-  <a href="/evaluation">Evaluasi</a>
-  <a href="/profile">Profil</a>
-  {% if user.role == 'admin' %}<a href="/admin">Admin</a>{% endif %}
-  <a href="/logout">Keluar</a>
- </nav>
- {% endif %}
+  <div class="logo">⚡ ALZZZ WEB</div>
+  {% if user %}
+  <div class="hamburger" onclick="var m = document.getElementById('myMenu'); m.style.display = (m.style.display === 'block') ? 'none' : 'block';">☰</div>
+  <div id="myMenu" class="menu-dropdown">
+      <a href="{{url_for('dashboard')}}">Dashboard</a>
+      <a href="{{url_for('profile')}}">Profil</a>
+      <a href="{{url_for('transactions')}}">Keuangan</a>
+      <a href="{{url_for('journal_page')}}">Trading</a>
+      <a href="{{url_for('evaluation_page')}}">Evaluasi (Otomatis)</a>
+      {% if user.role=='admin' %}<a href="{{url_for('admin_page')}}">Admin Panel</a>{% endif %}
+      <a href="{{url_for('logout')}}" style="color:var(--pink);">Keluar</a>
+  </div>
+  {% else %}
+  <a href="{{url_for('login')}}" style="color:var(--cyan);text-decoration:none;">Login</a>
+  {% endif %}
 </header>
-<main>
-{% with messages = get_flashed_messages() %}
- {% for msg in messages %}<div class="alert">{{msg}}</div>{% endfor %}
-{% endwith %}
-{{ content|safe }}
-</main>
-<footer> ALZZZ WEB • FINANCIAL CONTROL SYSTEM </footer>
-</body>
-</html>
+<main>{% for m in get_flashed_messages() %}<div class="msg">{{m}}</div>{% endfor %}{{ body|safe }}</main>
+<footer>AlZzz Web • Catat dan evaluasi keuangan dengan bijak</footer>
+</body></html>
 """
 
-def page(content, **kwargs):
-    user = None
-    if session.get("uid"):
-        with db() as c:
-            user = c.execute(
-                "SELECT * FROM users WHERE id=?", (session["uid"],)
-            ).fetchone()
-    return render_template_string(
-        BASE, content=render_template_string(content, **kwargs), user=user
-    )
+def page(title, body, **context):
+    return render_template_string(TEMPLATE, title=title, body=render_template_string(body, **context), user=current_user())
 
-@app.route("/register", methods=["GET","POST"])
-def register():
+@app.route("/")
+def home():
+    return redirect(url_for("dashboard") if current_user() else url_for("setup" if db().execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0 else "login"))
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    if db().execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
+        return redirect(url_for("login"))
     if request.method == "POST":
-        name = request.form.get("username","").strip()
-        pw = request.form.get("password","")
-        if len(name) < 3 or len(pw) < 8:
-            flash("Nama minimal 3 karakter dan password minimal 8 karakter.")
+        username = request.form.get("username", "").strip()
+        display = request.form.get("display_name", "").strip() or username
+        password = request.form.get("password", "")
+        if len(username) < 3 or len(password) < 12:
+            flash("Username minimal 3 karakter dan kata sandi minimal 12 karakter.")
         else:
-            try:
-                with db() as c:
-                    c.execute(
-                        "INSERT INTO users(username,password) VALUES(?,?)",
-                        (name,generate_password_hash(pw))
-                    )
-                flash("Pendaftaran berhasil. Silakan login.")
-                return redirect(url_for("login"))
-            except sqlite3.IntegrityError:
-                flash("Nama akun sudah digunakan.")
-    return page("""
-    <div class="card" style="max-width:430px;margin:40px auto">
-    <h2> Buat Akun</h2>
-    <form method="post">
-    Nama akun<input name="username" required minlength="3">
-    Password<input name="password" type="password" required minlength="8">
-    <button class="submit">Daftar</button>
-    </form><a href="/login">Sudah punya akun? Login</a>
-    </div>""")
+            db().execute("INSERT INTO users(username,password_hash,role,display_name) VALUES(?,?,?,?)",
+                         (username, generate_password_hash(password), "admin", display))
+            db().commit()
+            flash("Admin berhasil dibuat. Silakan login.")
+            return redirect(url_for("login"))
+    body = """<div class="panel"><h1>Pengaturan awal AlZzz Web</h1><p class="muted">Buat akun admin pertama.</p>
+    <form method="post"><label>Username admin</label><input name="username" required minlength="3">
+    <label>Nama tampilan</label><input name="display_name">
+    <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
+    <button>Buat admin</button></form></div>"""
+    return page("Setup", body)
 
-@app.route("/login", methods=["GET","POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        name = request.form.get("username","")
-        pw = request.form.get("password","")
-        with db() as c:
-            u = c.execute("SELECT * FROM users WHERE username=?", (name,)).fetchone()
-        if u and check_password_hash(u["password"],pw):
+        username = request.form.get("username", "").strip()
+        user = db().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if user and check_password_hash(user["password_hash"], request.form.get("password", "")):
             session.clear()
-            session["uid"] = u["id"]
-            session["role"] = u["role"]
-            session["name"] = u["username"]
-            flash("Selamat datang " + u["username"] + "!")
-            return redirect(url_for("home"))
-        flash("Nama akun atau password salah.")
-    return page("""
-    <div class="card" style="max-width:430px;margin:40px auto">
-    <h2> LOGIN</h2>
+            session["user_id"] = user["id"]
+            return redirect(url_for("dashboard"))
+        flash("Username atau kata sandi tidak cocok.")
+    body = """<div class="panel" style="max-width:350px;margin:auto;padding:15px;"><h1 style="text-align:center;">LOGIN</h1>
+    <form method="post"><label>Username</label><input name="username" required>
+    <label>Kata sandi</label><input type="password" name="password" required>
+    <button>Masuk</button></form>
+    <p style="text-align:center; margin-top:15px; font-size:14px;">Belum punya akun? <a href="{{url_for('register')}}" style="color:var(--cyan); text-decoration:none;">Daftar di sini</a></p>
+    </div>"""
+    return page("Login", body)
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if current_user():
+        return redirect(url_for("dashboard"))
+        
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        display = request.form.get("display_name", "").strip() or username
+        password = request.form.get("password", "")
+        if len(username) < 3 or len(password) < 12:
+            flash("Username minimal 3 karakter dan kata sandi minimal 12 karakter.")
+        else:
+            try:
+                db().execute("INSERT INTO users(username,password_hash,role,display_name) VALUES(?,?,?,?)",
+                             (username, generate_password_hash(password), "member", display))
+                db().commit()
+                flash("Pendaftaran berhasil! Silakan login.")
+                return redirect(url_for("login"))
+            except sqlite3.IntegrityError:
+                flash("Username sudah digunakan. Silakan pilih yang lain.")
+                
+    body = """<div class="panel" style="max-width:380px;margin:auto;padding:15px;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    <p class="muted" style="text-align:center;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
-    Nama akun<input name="username" required>
-    Password<input name="password" type="password" required>
-    <button class="submit">Masuk</button>
-    </form><a href="/register">Belum punya akun? Daftar</a>
-    </div>""")
+        <label>Username</label><input name="username" required minlength="3">
+        <label>Nama Tampilan (Opsional)</label><input name="display_name">
+        <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
+        <button>Daftar Sekarang</button>
+    </form>
+    <p style="text-align:center; margin-top:15px; font-size:14px;">Sudah punya akun? <a href="{{url_for('login')}}" style="color:var(--cyan); text-decoration:none;">Login di sini</a></p>
+    </div>"""
+    return page("Daftar", body)
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-@app.route("/")
+@app.route("/dashboard")
 @login_required
-def home():
-    with db() as c:
-        rows = c.execute("""
-        SELECT kind,SUM(amount) total FROM transactions
-        WHERE user_id=? AND strftime('%Y-%m',date)=?
-        GROUP BY kind
-        """,(session["uid"],datetime.now().strftime("%Y-%m"))).fetchall()
-
-        history = c.execute("""
-        SELECT * FROM transactions WHERE user_id=?
-        ORDER BY date DESC,id DESC LIMIT 7
-        """,(session["uid"],)).fetchall()
-
-    income = sum(r["total"] for r in rows if r["kind"]=="income")
-    expense = sum(r["total"] for r in rows if r["kind"]=="expense")
-    balance = income-expense
-    with db() as c:
-        transaction_count = c.execute(
-            "SELECT COUNT(*) FROM transactions WHERE user_id=?", (session["uid"],)
-        ).fetchone()[0]
-    xp = transaction_count * 20
-    level = xp // 100 + 1
-    progress = xp % 100
-
-    if expense > income and expense > 0:
-        comment = "⚠️ Pengeluaran lebih besar dari pemasukan. Evaluasi pengeluaranmu!"
-    elif expense > income * .7 and expense > 0:
-        comment = "💡 Pengeluaran cukup tinggi. Mulai atur prioritas!"
-    elif expense > 0:
-        comment = "🔥 Pengeluaran masih terkendali. Pertahankan!"
-    else:
-        comment = "🚀 Yuk mulai catat keuanganmu!"
-
-    if income >= 10000000:
-        income_comment = "🏆 Pemasukan bulan ini besar! Tetap bijak mengelolanya."
-    elif income > 0:
-        income_comment = "🌱 Pemasukan mulai tercatat. Terus kembangkan!"
-    else:
-        income_comment = "💼 Belum ada pemasukan tercatat bulan ini."
-
-    labels = []
-    ins = []
-    outs = []
-    with db() as c:
-        for i in range(1,13):
-            month = datetime.now().strftime("%Y") + f"-{i:02d}"
-            labels.append(month)
-            data = c.execute("""
-            SELECT kind,SUM(amount) total FROM transactions
-            WHERE user_id=? AND strftime('%Y-%m',date)=?
-            GROUP BY kind
-            """,(session["uid"],month)).fetchall()
-            ins.append(next((r["total"] or 0 for r in data if r["kind"]=="income"),0))
-            outs.append(next((r["total"] or 0 for r in data if r["kind"]=="expense"),0))
-
-    return page("""
-    <section class="card hero">
-      <div>
-        <div class="eyebrow"> YOUR FINANCIAL QUEST STARTS HERE</div>
-        <div class="hero-title">Selamat Datang,<br>{{name}}!</div>
-        <div id="clock" style="font-size:16px;color:var(--green);margin-top:13px"></div>
-        <p id="hijri" class="muted"></p>
-        <p class="muted">Bulan laporan: {{month}}</p>
-      </div>
-      <div class="hero-side">
-        <div style="font-size:34px">🏆</div>
-        <div class="eyebrow">PLAYER LEVEL</div>
-        <div style="font:800 30px Orbitron;color:var(--gold)">LVL {{level}}</div>
-        <div class="muted">{{xp}} XP • {{transaction_count}} transaksi tercatat</div>
-        <div class="progress"><span style="width:{{progress}}%"></span></div>
-        <div class="muted">{{progress}} / 100 XP menuju level berikutnya</div>
-      </div>
-    </section>
-    <section class="quick-links" style="margin-bottom:17px">
-      <a href="/transactions">💰<br>Catat Keuangan</a>
-      <a href="/trading">📈<br>Trading Journal</a>
-      <a href="/evaluation">🎯<br>Evaluasi</a>
-      <a href="/profile">👤<br>Profil Saya</a>
-    </section>
-    <div class="grid">
-      <div class="card stat-card"><div class="stat-label">💎 Total Pemasukan</div><div class="stat green">{{money(income)}}</div><div class="muted">Bulan ini</div></div>
-      <div class="card stat-card"><div class="stat-label"> Total Pengeluaran</div><div class="stat red">{{money(expense)}}</div><div class="muted">Bulan ini</div></div>
-      <div class="card stat-card"><div class="stat-label">🪙 Saldo Bersih</div><div class="stat">{{money(balance)}}</div><div class="muted">Pemasukan dikurangi pengeluaran</div></div>
-    </div>
-    <div class="chart-grid">
-      <div class="card chart-box"><div class="section-label"><h3>📊 Financial Performance</h3><small>12 bulan</small></div><canvas id="chart"></canvas></div>
-      <div class="card chart-box"><h3>🎮 Money Balance</h3><canvas id="mixChart"></canvas><p class="muted" style="text-align:center">Perbandingan pemasukan dan pengeluaran bulan ini</p></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>📢 Quest Evaluation</h3><p>{{comment}}</p><p>{{income_comment}}</p></div>
-      <div class="card"><h3>💡 Daily Mindset</h3><p class="quote" id="quote"></p><div class="eyebrow">DISCIPLINE • CONSISTENCY • GROWTH</div></div>
-    </div>
-    <div class="card">
-      <div class="section-label"><h3>📝 Recent Transactions</h3><a class="btn" href="/transactions">Lihat semua</a></div>
-      <div class="table-wrap"><table><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Nominal</th></tr>
-      {% for r in history %}<tr><td>{{r.date}}</td><td>{{'Pemasukan' if r.kind=='income' else 'Pengeluaran'}}</td><td>{{r.category}} - {{r.note}}</td><td>{{money(r.amount)}}</td></tr>
-      {% else %}<tr><td colspan="4">Belum ada transaksi. Mulai catat keuanganmu!</td></tr>{% endfor %}
-      </table></div>
-    </div>
+def dashboard():
+    user = current_user()
+    month = date.today().strftime("%Y-%m")
+    args = (user["id"], month + "%")
+    totals = db().execute("""SELECT kind,COALESCE(SUM(amount),0) total FROM transactions
+        WHERE user_id=? AND entry_date LIKE ? GROUP BY kind""", args).fetchall()
+    income = next((r["total"] for r in totals if r["kind"] == "Pemasukan"), 0)
+    expense = next((r["total"] for r in totals if r["kind"] == "Pengeluaran"), 0)
+    recent = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 8",(user["id"],)).fetchall()
+    
+    body = """<h1>Dashboard</h1><p class="muted">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
+    <div class="grid"><div class="stat"><small>Total pemasukan</small><strong>Rp {{'{:,.0f}'.format(income)}}</strong></div>
+    <div class="stat"><small>Total pengeluaran</small><strong>Rp {{'{:,.0f}'.format(expense)}}</strong></div>
+    <div class="stat"><small>Selisih</small><strong>Rp {{'{:,.0f}'.format(income-expense)}}</strong></div></div>
+    <div class="panel"><h2>Transaksi terbaru</h2>{% if recent %}<table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th></tr>
+    {% for x in recent %}<tr><td>{{x.entry_date}}</td><td>{{x.kind}}</td><td>{{x.category}}</td><td>Rp {{'{:,.0f}'.format(x.amount)}}</td></tr>{% endfor %}</table>{% else %}<p class="muted">Belum ada transaksi.</p>{% endif %}</div>
+    <div class="panel"><h2>Grafik bulan ini</h2><canvas id="chart" height="110"></canvas></div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-    function updateClock(){
-      const d=new Date();
-      document.getElementById('clock').textContent=d.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' • '+d.toLocaleTimeString('id-ID');
-      try{document.getElementById('hijri').textContent='Kalender Hijriah: '+new Intl.DateTimeFormat('id-ID-u-ca-islamic-umalqura',{day:'numeric',month:'long',year:'numeric'}).format(d)}catch(e){}
-    }
-    updateClock();setInterval(updateClock,1000);
-    Chart.defaults.color='#b9bdd5';Chart.defaults.font.family='Inter,Arial,sans-serif';
-    new Chart(document.getElementById('chart'),{type:'bar',data:{labels:{{labels|tojson}},datasets:[
-      {label:'Pemasukan',data:{{ins|tojson}},backgroundColor:'rgba(32,245,165,.78)',borderColor:'#20f5a5',borderWidth:1,borderRadius:7},
-      {label:'Pengeluaran',data:{{outs|tojson}},backgroundColor:'rgba(255,66,200,.72)',borderColor:'#ff42c8',borderWidth:1,borderRadius:7}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{usePointStyle:true,boxWidth:8}}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:'#ffffff12'}}}}});
-    new Chart(document.getElementById('mixChart'),{type:'doughnut',data:{labels:['Pemasukan','Pengeluaran'],datasets:[{data:[{{income}},{{expense}}],backgroundColor:['#20f5a5','#ff42c8'],borderColor:'#111329',borderWidth:4,hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}}});
-    const quotes=['Bangun kebiasaan finansial yang kuat, satu keputusan bijak setiap hari.','Konsistensi kecil hari ini dapat membentuk masa depan yang lebih baik.','Kuasai cara mengelola uang sebelum mengejar jumlah yang lebih besar.','Disiplin adalah fondasi dari setiap target yang ingin dicapai.','Investasi pada pengetahuan dan kemampuan diri selalu layak diperjuangkan.'];
-    document.getElementById('quote').textContent=quotes[Math.floor(Math.random()*quotes.length)];
-    </script>
-    """,name=session["name"],month=datetime.now().strftime("%B %Y"),
-    income=income,expense=expense,balance=balance,money=money,
-    comment=comment,income_comment=income_comment,history=history,
-    labels=labels,ins=ins,outs=outs,level=level,xp=xp,progress=progress,
-    transaction_count=transaction_count)
+    new Chart(document.getElementById('chart'),{type:'bar',data:{labels:['Pemasukan','Pengeluaran'],datasets:[{label:'Rupiah',data:[{{income}},{{expense}}]}]},options:{responsive:true,plugins:{legend:{display:false}}}});
+    
+    // Fitur Suara Sambutan
+    window.onload = function() {
+        if ('speechSynthesis' in window) {
+            var namaUser = "{{ user.display_name|safe }}";
+            var pesan = "Selamat datang bos " + namaUser + ", semoga rezekimu lancar dan berkah hari ini";
+            var speech = new SpeechSynthesisUtterance(pesan);
+            speech.lang = 'id-ID'; 
+            speech.rate = 0.9; 
+            speech.pitch = 1; 
+            
+            setTimeout(function() {
+                window.speechSynthesis.speak(speech);
+            }, 500);
+        }
+    };
+    </script>"""
+    return page("Dashboard", body, user=user, month=month, income=income, expense=expense, recent=recent)
 
-@app.route("/transactions", methods=["GET","POST"])
+@app.route("/transactions", methods=["GET", "POST"])
+@app.route("/transactions/edit/<int:id>", methods=["GET", "POST"])
 @login_required
-def transactions():
-    uid=session["uid"]
-    if request.method=="POST":
+def transactions(id=None):
+    user = current_user()
+    edit_data = None
+    if id:
+        edit_data = db().execute("SELECT * FROM transactions WHERE id=? AND user_id=?", (id, user["id"])).fetchone()
+        if not edit_data:
+            flash("Transaksi tidak ditemukan.")
+            return redirect(url_for("transactions"))
+
+    if request.method == "POST":
+        kind = request.form.get("kind")
+        category = request.form.get("category", "").strip()
+        description = request.form.get("description", "").strip()
         try:
-            kind=request.form["kind"]
-            amount=float(request.form["amount"])
-            category=request.form["category"].strip()
-            note=request.form.get("note","").strip()
-            date=request.form["date"]
-            if kind not in ("income","expense") or amount<=0:
+            amount = float(request.form.get("amount", "0"))
+            entry_date = request.form.get("entry_date") or date.today().isoformat()
+            if kind not in ("Pemasukan", "Pengeluaran") or not category or amount <= 0:
                 raise ValueError()
-            datetime.strptime(date,"%Y-%m-%d")
-            if len(category)>60 or len(note)>300:
-                raise ValueError()
-            with db() as c:
-                c.execute("""INSERT INTO transactions
-                (user_id,kind,amount,category,note,date)
-                VALUES(?,?,?,?,?,?)""",(uid,kind,amount,category,note,date))
-            flash("Transaksi berhasil disimpan.")
-        except (ValueError,KeyError):
-            flash("Data transaksi tidak valid.")
-        return redirect(url_for("transactions"))
+            
+            if id: 
+                db().execute("UPDATE transactions SET kind=?, category=?, amount=?, description=?, entry_date=? WHERE id=? AND user_id=?",
+                             (kind, category, amount, description, entry_date, id, user["id"]))
+                flash("Transaksi berhasil diperbarui.")
+            else: 
+                db().execute("INSERT INTO transactions(user_id,kind,category,amount,description,entry_date) VALUES(?,?,?,?,?,?)",
+                             (user["id"], kind, category, amount, description, entry_date))
+                flash("Transaksi berhasil disimpan.")
+            db().commit()
+            return redirect(url_for("transactions"))
+        except ValueError:
+            flash("Periksa jenis, kategori, tanggal, dan jumlah transaksi.")
+            
+    rows = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
+    
+    form_title = "Edit Transaksi" if edit_data else "Catat Transaksi"
+    val_kind = edit_data['kind'] if edit_data else 'Pemasukan'
+    val_cat = edit_data['category'] if edit_data else 'Makanan'
+    val_amt = edit_data['amount'] if edit_data else ''
+    val_date = edit_data['entry_date'] if edit_data else date.today().isoformat()
+    val_desc = edit_data['description'] if edit_data else ''
+    form_action = url_for('transactions', id=id) if id else url_for('transactions')
 
-    with db() as c:
-        rows=c.execute("SELECT * FROM transactions WHERE user_id=? ORDER BY date DESC,id DESC",(uid,)).fetchall()
+    body = """<div class="panel"><h1>{{form_title}}</h1><form method="post" action="{{form_action}}"><div class="row">
+    <div><label>Jenis</label><select name="kind">
+        <option {% if val_kind=="Pemasukan" %}selected{% endif %}>Pemasukan</option>
+        <option {% if val_kind=="Pengeluaran" %}selected{% endif %}>Pengeluaran</option>
+    </select></div>
+    <div><label>Kategori</label><select name="category" id="category-select">
+        <option>Makanan</option><option>Minuman</option><option>Gaji</option><option>Transportasi</option><option>Belanja</option><option>Tabungan</option><option>Lainnya</option>
+    </select></div>
+    <div><label>Jumlah (Rp)</label><input type="number" name="amount" min="1" step="1" value="{{val_amt}}" required></div>
+    <div><label>Tanggal</label><input type="date" name="entry_date" value="{{val_date}}" required></div></div>
+    <label>Keterangan</label><textarea name="description">{{val_desc}}</textarea><button>Simpan</button></form></div>
+    
+    <div class="panel"><h2>Riwayat Keuangan</h2>{% if rows %}<table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th><th>Aksi</th></tr>
+    {% for x in rows %}<tr><td>{{x.entry_date}}</td><td>{{x.kind}}</td><td>{{x.category}}</td><td>Rp {{'{:,.0f}'.format(x.amount)}}</td>
+    <td><a href="{{url_for('transactions', id=x.id)}}" class="edit-btn">✏️ Edit</a></td></tr>{% endfor %}</table>{% else %}<p class="muted">Belum ada data.</p>{% endif %}</div>"""
+    
+    script = f"""<script>
+    document.getElementById('category-select').value = "{val_cat}";
+    </script>"""
+    
+    return page("Transaksi", body + script, rows=rows, form_title=form_title, form_action=form_action,
+                val_kind=val_kind, val_amt=val_amt, val_date=val_date, val_desc=val_desc)
 
-    return page("""
-    <div class="card"><h2>💰 Catat Keuangan</h2>
-    <form method="post">
-    Jenis transaksi<select name="kind"><option value="income">Pemasukan</option><option value="expense">Pengeluaran</option></select>
-    Nominal (Rupiah)<input type="number" name="amount" min="1" step="1" required>
-    Kategori<select name="category">
-    {% for x in ['Gaji','Bisnis','Freelance','Investasi','Makan','Minum','Transportasi','Belanja','Tagihan','Pendidikan','Kesehatan','Hiburan','Lainnya'] %}
-    <option>{{x}}</option>{% endfor %}
-    </select>
-    Keterangan<textarea name="note" maxlength="300" placeholder="Contoh: makan siang, gaji bulanan..."></textarea>
-    Tanggal<input type="date" name="date" value="{{today}}" required>
-    <button>Simpan Transaksi</button></form></div>
-    <div class="card"><h3>📋 Riwayat Keuangan</h3>
-    <div class="table-wrap"><table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Nominal</th></tr>
-    {% for r in rows %}<tr><td>{{r.date}}</td><td>{{r.kind}}</td>
-    <td>{{r.category}} {{r.note}}</td><td>{{money(r.amount)}}</td></tr>
-    {% else %}<tr><td colspan="4">Belum ada data.</td></tr>{% endfor %}
-    </table></div></div>
-    <div class="card"><h3>📥 Download Rekap Bulanan</h3>
-    <form action="/export" method="get">
-    <input type="month" name="month" value="{{month}}" required>
-    <button>Download CSV</button></form></div>
-    """,rows=rows,today=datetime.now().strftime("%Y-%m-%d"),
-    month=datetime.now().strftime("%Y-%m"),money=money)
-
-@app.route("/export")
+@app.route("/journal", methods=["GET", "POST"])
 @login_required
-def export():
-    month=request.args.get("month",datetime.now().strftime("%Y-%m"))
-    try:
-        datetime.strptime(month,"%Y-%m")
-    except ValueError:
-        abort(400)
-    with db() as c:
-        rows=c.execute("""SELECT date,kind,category,note,amount
-        FROM transactions WHERE user_id=? AND strftime('%Y-%m',date)=?
-        ORDER BY date""",(session["uid"],month)).fetchall()
-    output=io.StringIO()
-    writer=csv.writer(output)
-    writer.writerow(["Tanggal","Jenis","Kategori","Keterangan","Nominal"])
-    for r in rows:
-        writer.writerow(list(r))
-    data=io.BytesIO(("\ufeff"+output.getvalue()).encode("utf-8"))
-    return send_file(data,mimetype="text/csv",
-        as_attachment=True,download_name="AlZzz-Rekap-"+month+".csv")
+def journal_page():
+    user = current_user()
+    if request.method == "POST":
+        symbol = request.form.get("symbol", "").strip()
+        if symbol:
+            db().execute("INSERT INTO journal(user_id,symbol,plan,result,notes,entry_date) VALUES(?,?,?,?,?,?)",
+                         (user["id"], symbol, request.form.get("plan",""), request.form.get("result",""),
+                          request.form.get("notes",""), request.form.get("entry_date") or date.today().isoformat()))
+            db().commit()
+            flash("Catatan jurnal tersimpan.")
+            return redirect(url_for("journal_page"))
+        flash("Nama aset/instrumen wajib diisi.")
+    rows = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
+    body = """<div class="panel"><h1>Jurnal trading</h1><p class="muted">Gunakan untuk mencatat rencana dan evaluasi.</p>
+    <form method="post"><label>Aset / instrumen</label><input name="symbol" required>
+    <label>Rencana</label><textarea name="plan"></textarea><label>Hasil</label><input name="result">
+    <label>Catatan</label><textarea name="notes"></textarea><label>Tanggal</label><input type="date" name="entry_date" value="{{today}}">
+    <button>Simpan jurnal</button></form></div><div class="panel"><h2>Riwayat jurnal</h2>
+    {% for x in rows %}<div style="border-bottom:1px solid #243454;padding:10px 0"><b>{{x.entry_date}} • {{x.symbol}}</b><p>{{x.plan}}</p><p>{{x.result}}</p><p class="muted">{{x.notes}}</p></div>{% else %}<p class="muted">Belum ada catatan jurnal.</p>{% endfor %}</div>"""
+    return page("Jurnal", body, rows=rows, today=date.today().isoformat())
 
-@app.route("/trading", methods=["GET","POST"])
+@app.route("/evaluation")
 @login_required
-def trading():
-    uid=session["uid"]
-    if request.method=="POST":
-        try:
-            asset=request.form["asset"].strip()
-            position=request.form["position"]
-            entry=float(request.form["entry"])
-            exitp=float(request.form["exit_price"])
-            note=request.form.get("note","").strip()
-            date=request.form["date"]
-            if not asset or len(asset)>40 or position not in ("BUY","SELL"):
-                raise ValueError()
-            datetime.strptime(date,"%Y-%m-%d")
-            with db() as c:
-                c.execute("""INSERT INTO trades
-                (user_id,asset,position,entry,exit_price,result,note,date)
-                VALUES(?,?,?,?,?,?,?,?)""",
-                (uid,asset,position,entry,exitp,exitp-entry,note,date))
-            flash("Jurnal trading disimpan.")
-        except (ValueError,KeyError):
-            flash("Data trading tidak valid.")
-        return redirect(url_for("trading"))
-    with db() as c:
-        rows=c.execute("SELECT * FROM trades WHERE user_id=? ORDER BY date DESC,id DESC",(uid,)).fetchall()
-    return page("""
-    <div class="card"><h2>📈 Trading Journal</h2>
-    <form method="post">
-    Aset / Pair<input name="asset" placeholder="Contoh: BTC/USDT" required maxlength="40">
-    Posisi<select name="position"><option>BUY</option><option>SELL</option></select>
-    Harga masuk<input type="number" step="any" name="entry" required>
-    Harga keluar<input type="number" step="any" name="exit_price" required>
-    Tanggal<input type="date" name="date" value="{{today}}" required>
-    Evaluasi<textarea name="note" placeholder="Alasan entry, rencana, pelajaran..." maxlength="300"></textarea>
-    <button>Simpan Jurnal</button></form>
-    <p class="muted">Catatan hasil dihitung dari selisih harga keluar dan masuk, bukan profit bersih. Untuk posisi SELL, interpretasikan hasil secara terbalik.</p>
-    </div>
-    <div class="card"><h3>Riwayat Trading</h3>
-    <div class="table-wrap"><table><tr><th>Tanggal</th><th>Aset</th><th>Posisi</th><th>Entry</th><th>Exit</th><th>Selisih</th><th>Catatan</th></tr>
-    {% for r in rows %}<tr><td>{{r.date}}</td><td>{{r.asset}}</td><td>{{r.position}}</td>
-    <td>{{r.entry}}</td><td>{{r.exit_price}}</td>
-    <td>{{r.exit_price-r.entry}}</td><td>{{r.note}}</td></tr>
-    {% else %}<tr><td colspan="7">Belum ada jurnal.</td></tr>{% endfor %}
-    </table></div></div>
-    """,rows=rows,today=datetime.now().strftime("%Y-%m-%d"))
+def evaluation_page():
+    user = current_user()
+    rows = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
+    
+    body = """<div class="panel"><h1>Evaluasi Otomatis AI</h1><p class="muted">Sistem akan menganalisis jurnal tradingmu secara otomatis.</p>"""
+    if not rows:
+        body += "<p>Belum ada data trading untuk dievaluasi.</p></div>"
+    else:
+        body += """<table><tr><th>Tanggal</th><th>Aset</th><th>Hasil Evaluasi Sistem</th></tr>"""
+        for x in rows:
+            eval_text = auto_evaluate(x["plan"], x["result"], x["notes"])
+            body += f"""<tr><td>{x['entry_date']}</td><td><b>{x['symbol']}</b></td><td style="white-space:normal; max-width:400px;">{eval_text}</td></tr>"""
+        body += "</table></div>"
+    
+    return page("Evaluasi", body, rows=rows)
 
-@app.route("/evaluation",methods=["GET","POST"])
-@login_required
-def evaluation():
-    uid=session["uid"]
-    month=datetime.now().strftime("%Y-%m")
-    if request.method=="POST":
-        criticism=request.form.get("criticism","")[:2000]
-        suggestion=request.form.get("suggestion","")[:2000]
-        with db() as c:
-            c.execute("""INSERT INTO evaluations(user_id,month,criticism,suggestion)
-            VALUES(?,?,?,?) ON CONFLICT(user_id,month) DO UPDATE SET
-            criticism=excluded.criticism,suggestion=excluded.suggestion""",
-            (uid,month,criticism,suggestion))
-        flash("Evaluasi bulanan berhasil disimpan.")
-        return redirect(url_for("evaluation"))
-    with db() as c:
-        old=c.execute("SELECT * FROM evaluations WHERE user_id=? AND month=?",
-        (uid,month)).fetchone()
-    return page("""
-    <div class="card"><h2>📝 Evaluasi Bulanan</h2>
-    <p>Bulan {{month}}</p>
-    <form method="post">
-    Kritik terhadap pengelolaan keuangan<textarea name="criticism" rows="5">{{old.criticism if old else ''}}</textarea>
-    Saran dan target bulan berikutnya<textarea name="suggestion" rows="5">{{old.suggestion if old else ''}}</textarea>
-    <button>Simpan Evaluasi</button>
-    </form></div>
-    """,month=month,old=old)
-
-@app.route("/profile",methods=["GET","POST"])
+@app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
-    uid=session["uid"]
-    with db() as c:
-        u=c.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
-    if request.method=="POST":
-        name=request.form.get("username","").strip()
-        old=request.form.get("old_password","")
-        new=request.form.get("new_password","")
-        photo=request.files.get("photo")
-        if not check_password_hash(u["password"],old):
-            flash("Password lama salah.")
-        elif len(name)<3 or len(new)<8:
-            flash("Nama minimal 3 karakter dan password baru minimal 8 karakter.")
-        else:
-            filename=u["photo"]
-            if photo and photo.filename:
-                ext=os.path.splitext(secure_filename(photo.filename))[1].lower()
-                if ext not in (".png",".jpg",".jpeg",".webp"):
-                    flash("Foto harus PNG, JPG, JPEG atau WEBP.")
+    user = current_user()
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "update_bio":
+            db().execute("UPDATE users SET bio=? WHERE id=?", (request.form.get("bio",""), user["id"]))
+            db().commit()
+            flash("Bio diperbarui.")
+            
+        elif action == "update_credentials":
+            display = request.form.get("display_name", "").strip() or user["username"]
+            db().execute("UPDATE users SET display_name=? WHERE id=?", (display, user["id"]))
+            new_password = request.form.get("new_password", "")
+            if new_password:
+                if len(new_password) < 12:
+                    flash("Kata sandi baru minimal 12 karakter.")
                     return redirect(url_for("profile"))
-                filename=secrets.token_hex(16)+ext
-                photo.save(os.path.join(UPLOAD,filename))
-            try:
-                with db() as c:
-                    c.execute("""UPDATE users SET username=?,password=?,photo=?
-                    WHERE id=?""",(name,generate_password_hash(new),filename,uid))
-                session["name"]=name
-                flash("Profil berhasil diperbarui.")
-                return redirect(url_for("profile"))
-            except sqlite3.IntegrityError:
-                flash("Nama akun sudah dipakai.")
-    return page("""
-    <div class="card"><h2>👤 Pengaturan Profil</h2>
-    {% if u.photo %}<img class="profile" src="/uploads/{{u.photo}}">{% endif %}
-    <form method="post" enctype="multipart/form-data">
-    Nama akun baru<input name="username" value="{{u.username}}" required>
-    Foto profil<input type="file" name="photo" accept="image/png,image/jpeg,image/webp">
-    Password lama<input name="old_password" type="password" required>
-    Password baru<input name="new_password" type="password" minlength="8" required>
-    <button>Simpan Perubahan</button>
-    </form></div>
-    """,u=u)
+                db().execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_password), user["id"]))
+            db().commit()
+            flash("Nama/Password diperbarui.")
+            
+        elif action == "update_photo":
+            file = request.files.get("photo")
+            if file and file.filename:
+                ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+                if ext in ALLOWED_EXTENSIONS:
+                    filename = secure_filename(f"user_{user['id']}_{int(datetime.now().timestamp())}.{ext}")
+                    file.save(os.path.join(UPLOAD_DIR, filename))
+                    db().execute("UPDATE users SET photo=? WHERE id=?", (filename, user["id"]))
+                    db().commit()
+                    flash("Foto profil diperbarui.")
+                else:
+                    flash("Format foto tidak didukung.")
+        return redirect(url_for("profile"))
+        
+    body = """
+    <div class="panel" style="text-align:center; position:relative;">
+        <div class="avatar-container">
+            {% if user.photo %}
+                <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
+            {% else %}
+                <div class="avatar" style="background:#243454; display:flex; align-items:center; justify-content:center; margin:0 auto;">👤</div>
+            {% endif %}
+            <a href="#" class="edit-icon" onclick="document.getElementById('photoForm').style.display='block';">✏️</a>
+        </div>
+        
+        <h1 style="margin-top:10px;">{{user.display_name}} <a href="#" style="font-size:14px;text-decoration:none;" onclick="document.getElementById('credForm').style.display='block';">✏️</a></h1>
+        <p class="muted" style="margin-bottom:15px;">@{{user.username}}</p>
+        
+        <div style="background:#0a1020;padding:15px;border-radius:10px;border:1px solid #344665;text-align:left;">
+            <b>Bio:</b> <span class="muted">{{user.bio if user.bio else 'Belum ada bio.'}}</span> 
+            <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
+        </div>
+    </div>
 
-@app.route("/uploads/<filename>")
+    <div id="photoForm" class="panel" style="display:none;">
+        <h2>Ubah Foto Profil</h2>
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="update_photo">
+            <input type="file" name="photo" accept=".png,.jpg,.jpeg,.webp" required>
+            <button>Upload Foto</button>
+        </form>
+    </div>
+
+    <div id="bioForm" class="panel" style="display:none;">
+        <h2>Ubah Bio</h2>
+        <form method="post">
+            <input type="hidden" name="action" value="update_bio">
+            <textarea name="bio" placeholder="Tulis biografi singkat...">{{user.bio if user.bio else ''}}</textarea>
+            <button>Simpan Bio</button>
+        </form>
+    </div>
+
+    <div id="credForm" class="panel" style="display:none;">
+        <h2>Ubah Nama & Sandi</h2>
+        <form method="post">
+            <input type="hidden" name="action" value="update_credentials">
+            <label>Nama Tampilan</label><input name="display_name" value="{{user.display_name}}">
+            <label>Kata Sandi Baru (Kosongkan jika tidak diganti)</label><input type="password" name="new_password">
+            <button>Simpan Perubahan</button>
+        </form>
+    </div>
+    """
+    return page("Profil", body, user=user)
+
+@app.route("/static_uploads/<path:filename>")
 @login_required
-def uploads(filename):
+def uploaded_file(filename):
     from flask import send_from_directory
-    return send_from_directory(UPLOAD,filename)
+    return send_from_directory(UPLOAD_DIR, filename)
 
-@app.route("/admin",methods=["GET","POST"])
-@login_required
+@app.route("/admin", methods=["GET", "POST"])
+@app.route("/admin/delete/<int:id>", methods=["POST"])
 @admin_required
-def admin():
-    if request.method=="POST":
-        name=request.form.get("username","").strip()
-        pw=request.form.get("password","")
-        role=request.form.get("role","member")
-        if len(name)<3 or len(pw)<8 or role not in ("admin","member"):
-            flash("Data akun tidak valid.")
+def admin_page(id=None):
+    if id:
+        if id != current_user()["id"]:
+            db().execute("DELETE FROM users WHERE id=?", (id,))
+            db().commit()
+            flash("Member berhasil dihapus.")
+        else:
+            flash("Anda tidak bisa menghapus akun Anda sendiri.")
+        return redirect(url_for("admin_page"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        display = request.form.get("display_name", "").strip() or username
+        if len(username) < 3 or len(password) < 12:
+            flash("Username minimal 3 karakter dan sandi minimal 12 karakter.")
         else:
             try:
-                with db() as c:
-                    c.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)",
-                    (name,generate_password_hash(pw),role))
-                flash("Akun berhasil dibuat.")
+                db().execute("INSERT INTO users(username,password_hash,role,display_name) VALUES(?,?,?,?)",
+                             (username, generate_password_hash(password), "member", display))
+                db().commit()
+                flash("Akun anggota berhasil dibuat.")
             except sqlite3.IntegrityError:
-                flash("Nama akun sudah digunakan.")
-        return redirect(url_for("admin"))
-
-    with db() as c:
-        users=c.execute("SELECT id,username,role,photo FROM users ORDER BY id").fetchall()
-    return page("""
-    <div class="card"><h2>🛡️ ADMIN CONTROL</h2>
-    <p>Total akun terdaftar: {{users|length}}</p>
-    <h3>Tambah Admin / Member</h3>
-    <form method="post">
-    Nama akun<input name="username" required minlength="3">
-    Password<input name="password" type="password" required minlength="8">
-    Hak akses<select name="role"><option value="member">Member</option><option value="admin">Admin</option></select>
-    <button>Buat Akun</button></form></div>
-    <div class="card"><h3>👥 Daftar Member dan Admin</h3>
-    <div class="table-wrap"><table><tr><th>ID</th><th>Nama</th><th>Role</th></tr>
-    {% for u in users %}<tr><td>{{u.id}}</td><td>{{u.username}}</td><td>{{u.role}}</td></tr>{% endfor %}
-    </table></div></div>
-    """,users=users)
-
-@app.errorhandler(403)
-def forbidden(e):
-    return "Akses ditolak. Halaman ini khusus admin.",403
+                flash("Username sudah digunakan.")
+                
+    users = db().execute("SELECT id,username,display_name,role FROM users ORDER BY id").fetchall()
+    body = """<div class="panel"><h1>Admin Panel</h1><form method="post"><label>Username anggota</label><input name="username" required minlength="3">
+    <label>Nama tampilan</label><input name="display_name"><label>Sandi (minimal 12 karakter)</label><input name="password" type="password" required minlength="12">
+    <button>Buat akun anggota</button></form></div>
+    
+    <div class="panel"><h2>Daftar Akun</h2><table><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Aksi</th></tr>
+    {% for x in users %}<tr><td>{{x.username}}</td><td>{{x.display_name}}</td><td>{{x.role}}</td>
+    <td>{% if x.role != 'admin' %}
+        <form method="post" action="{{url_for('admin_page', id=x.id)}}" onsubmit="return confirm('Hapus member ini?');" style="margin:0;">
+            <button class="btn-danger" type="submit">Hapus</button>
+        </form>
+    {% else %}-{% endif %}</td></tr>{% endfor %}</table></div>"""
+    return page("Admin", body, users=users)
 
 @app.errorhandler(413)
-def too_large(e):
-    return "Ukuran file terlalu besar. Maksimal 3 MB.",413
+def too_large(_error):
+    flash("Ukuran file terlalu besar. Maksimal 2 MB.")
+    return redirect(url_for("profile"))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0",port=5000,debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
