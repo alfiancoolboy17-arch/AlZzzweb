@@ -8,23 +8,20 @@ from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- PENGATURAN OTOMATIS DATABASE (Aman untuk Netrun dan Termux) ---
+# --- PENGATURAN OTOMATIS DATABASE ---
 if os.environ.get("DATABASE_PATH"):
     DB_PATH = os.environ.get("DATABASE_PATH")
 elif os.path.exists("/data"):
-    DB_PATH = "/data/alzzz_baru.db" # Menggunakan nama baru agar bersih dari error
+    DB_PATH = "/data/alzzz_baru.db" 
 else:
     DB_PATH = os.path.join(BASE_DIR, "alzzz.db") 
-# -------------------------------------------------------------------
+# ------------------------------------
 
 UPLOAD_DIR = os.path.join(BASE_DIR, "static_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
-
-# --- KUNCI RAHASIA OTOMATIS ---
 app.secret_key = os.environ.get("ALZZZ_SECRET", "Admin1701")
-# ------------------------------
 
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
@@ -73,27 +70,20 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
     
-    # --- KODE ANTI HILANG DATA ---
     try:
         conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
     except sqlite3.OperationalError:
         pass 
-    # -----------------------------
 
-    # --- KODE OTOMATIS BUAT AKUN ADMIN (BARU) ---
     try:
-        # Cek apakah user AlZzz sudah ada
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username = ?", ("AlZzz",))
         if not cursor.fetchone():
-            # Jika belum ada, buat otomatis
             hashed_pw = generate_password_hash("Alfian170103")
             conn.execute("INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
                          ("AlZzz", hashed_pw, "admin", "AlZzz"))
-            print("Akun Admin 'AlZzz' berhasil dibuat otomatis.")
     except Exception as e:
-        print("Gagal membuat admin otomatis:", e)
-    # --------------------------------------------
+        pass
 
     conn.commit()
     conn.close()
@@ -125,7 +115,7 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-def auto_evaluate(plan, result, notes):
+def auto_evaluate_trading(plan, result, notes):
     plan = plan or ""
     result = result or ""
     notes = notes or ""
@@ -133,32 +123,48 @@ def auto_evaluate(plan, result, notes):
     feedback = []
     
     if len(plan) < 10:
-        feedback.append("Rencana trading terlalu singkat, kurang terstruktur.")
+        feedback.append("Rencana trading terlalu singkat.")
     else:
         score += 20
         
     result_lower = result.lower()
     if "profit" in result_lower or "tp" in result_lower:
         score += 40
-        feedback.append("Hasil positif, pertahankan manajemen risiko.")
+        feedback.append("Hasil positif, pertahankan!")
     elif "loss" in result_lower or "sl" in result_lower:
         score += 20
-        feedback.append("Mengalami kerugian. Evaluasi apakah Stop Loss terlalu ketat.")
+        feedback.append("Kerugian, evaluasi SL-mu.")
         
     if len(notes) > 20:
         score += 20
-        feedback.append("Catatan evaluasi bagus, kesadaran diri tinggi.")
+        feedback.append("Catatan bagus.")
     else:
-        feedback.append("Catatan evaluasi kurang mendalam, coba tuliskan pelajaran yang didapat.")
+        feedback.append("Catatan kurang mendalam.")
         
-    if score >= 60:
-        verdict = "SANGAT BAIK: Eksekusi trading kamu terukur dan penuh perhitungan."
-    elif score >= 30:
-        verdict = "CUKUP BAIK: Ada beberapa area yang perlu diperbaiki, terutama kedisiplinan."
-    else:
-        verdict = "PERLU PERBAIKAN: Trading terkesan emosional. Fokus pada rencana dan risk management."
+    if score >= 60: verdict = "SANGAT BAIK: Eksekusi terukur."
+    elif score >= 30: verdict = "CUKUP BAIK: Perlu perbaikan kedisiplinan."
+    else: verdict = "PERLU PERBAIKAN: Terkesan emosional."
         
     return f"{verdict} " + " ".join(feedback)
+
+# --- FUNGSI EVALUASI KEUANGAN BARU ---
+def auto_evaluate_finance(kind, category, amount, description):
+    amount = float(amount)
+    if kind == "Pengeluaran":
+        if amount > 1000000:
+            return "🚨 WADUH! Pengeluaran sangat besar. Pastikan ini kebutuhan mendesak, bukan sekadar keinginan!"
+        elif category == "Makanan" or category == "Minuman":
+            return "🍔 Kamu cukup sering jajan. Ingat, menabung itu penting untuk masa depan!"
+        elif category == "Belanja":
+            return "🛍️ Belanja lagi? Kontrol emosi dan cek keranjang belanjamu sebelum checkout!"
+        else:
+            return "📉 Pengeluaran tercatat. Pastikan pengeluaran ini memberi manfaat jangka panjang."
+    else:
+        if amount > 5000000:
+            return "💰 Pemasukan besar! Segera alokasikan ke tabungan atau investasi sebelum habis untuk hal konsumtif."
+        else:
+            return "📈 Pemasukan bagus. Sisihkan minimal 10% untuk tabungan."
+# --------------------------------------
 
 TEMPLATE = r"""
 <!doctype html><html lang="id"><head><meta charset="utf-8">
@@ -202,6 +208,27 @@ footer{text-align:center;color:var(--muted);padding:30px}
     50% { box-shadow: 0 0 10px #00ff88, inset 0 0 5px #00ff88; border-color: #00ff88; }
     75% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; border-color: #ffeb3b; }
 }
+
+/* CSS untuk Pemutar Musik Melayang */
+.music-player {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #11182bee;
+    border: 2px solid var(--pink);
+    border-radius: 50px;
+    padding: 10px;
+    box-shadow: 0 0 15px var(--pink);
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.music-player p { margin: 0; font-size: 12px; color: var(--text); }
+.music-player button {
+    margin: 0; padding: 5px 15px; border-radius: 20px; font-size: 14px; width: auto;
+    background: var(--pink); color: white; border: none;
+}
 </style></head><body>
 <header>
   <div class="logo">⚡ ALZZZ WEB</div>
@@ -222,6 +249,32 @@ footer{text-align:center;color:var(--muted);padding:30px}
 </header>
 <main>{% for m in get_flashed_messages() %}<div class="msg">{{m}}</div>{% endfor %}{{ body|safe }}</main>
 <footer>AlZzz Web • Catat dan evaluasi keuangan dengan bijak</footer>
+
+{% if user %}
+<!-- FITUR MUSIK DJ -->
+<audio id="djAudio" loop>
+  <!-- GANTI LINK MP3 DI BAWAH INI DENGAN LINK LAGU DJ KAMU -->
+  <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+</audio>
+<div class="music-player">
+    <p>🎵 DJ Tuang Lagi</p>
+    <button onclick="togglePlay()" id="playBtn">Play</button>
+</div>
+<script>
+    var audio = document.getElementById("djAudio");
+    var btn = document.getElementById("playBtn");
+    function togglePlay() {
+        if (audio.paused) {
+            audio.play();
+            btn.innerHTML = "Pause";
+        } else {
+            audio.pause();
+            btn.innerHTML = "Play";
+        }
+    }
+</script>
+{% endif %}
+
 </body></html>
 """
 
@@ -340,12 +393,8 @@ def dashboard():
             var namaUser = "{{ user.display_name|safe }}";
             var pesan = "Selamat datang bos " + namaUser + ", semoga rezekimu lancar dan berkah hari ini";
             var speech = new SpeechSynthesisUtterance(pesan);
-            speech.lang = 'id-ID'; 
-            speech.rate = 0.9; 
-            speech.pitch = 1; 
-            setTimeout(function() {
-                window.speechSynthesis.speak(speech);
-            }, 500);
+            speech.lang = 'id-ID'; speech.rate = 0.9; speech.pitch = 1; 
+            setTimeout(function() { window.speechSynthesis.speak(speech); }, 500);
         }
     };
     </script>"""
@@ -442,23 +491,36 @@ def journal_page():
     {% for x in rows %}<div style="border-bottom:1px solid #243454;padding:10px 0"><b>{{x.entry_date}} • {{x.symbol}}</b><p>{{x.plan}}</p><p>{{x.result}}</p><p class="muted">{{x.notes}}</p></div>{% else %}<p class="muted">Belum ada catatan jurnal.</p>{% endfor %}</div>"""
     return page("Jurnal", body, rows=rows, today=date.today().isoformat())
 
+# --- HALAMAN EVALUASI (DIPERBARUI) ---
 @app.route("/evaluation")
 @login_required
 def evaluation_page():
     user = current_user()
-    rows = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
+    journals = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
+    transactions = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 20",(user["id"],)).fetchall()
     
-    body = """<div class="panel"><h1>Evaluasi Otomatis AI</h1><p class="muted">Sistem akan menganalisis jurnal tradingmu secara otomatis.</p>"""
-    if not rows:
-        body += "<p>Belum ada data trading untuk dievaluasi.</p></div>"
+    body = """<div class="panel"><h1>Evaluasi Jurnal Trading</h1><p class="muted">Sistem menganalisis cara tradingmu.</p>"""
+    if not journals:
+        body += "<p>Belum ada data trading.</p></div>"
     else:
         body += """<table><tr><th>Tanggal</th><th>Aset</th><th>Hasil Evaluasi Sistem</th></tr>"""
-        for x in rows:
-            eval_text = auto_evaluate(x["plan"], x["result"], x["notes"])
+        for x in journals:
+            eval_text = auto_evaluate_trading(x["plan"], x["result"], x["notes"])
             body += f"""<tr><td>{x['entry_date']}</td><td><b>{x['symbol']}</b></td><td style="white-space:normal; max-width:400px;">{eval_text}</td></tr>"""
         body += "</table></div>"
+
+    body += """<div class="panel" style="border-color: var(--pink);"><h1>Evaluasi Keuangan (Baru!)</h1><p class="muted">Sistem menganalisis polamu dalam membelanjakan uang.</p>"""
+    if not transactions:
+        body += "<p>Belum ada data keuangan.</p></div>"
+    else:
+        body += """<table><tr><th>Tanggal</th><th>Kategori</th><th>Jumlah</th><th>Komentar Sistem</th></tr>"""
+        for x in transactions:
+            eval_fin = auto_evaluate_finance(x["kind"], x["category"], x["amount"], x["description"])
+            body += f"""<tr><td>{x['entry_date']}</td><td>{x['category']}</td><td>Rp {x['amount']:,.0f}</td><td style="white-space:normal; max-width:300px; color:var(--cyan);">{eval_fin}</td></tr>"""
+        body += "</table></div>"
     
-    return page("Evaluasi", body, rows=rows)
+    return page("Evaluasi", body)
+# ------------------------------------
 
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
