@@ -160,7 +160,6 @@ TEMPLATE = r"""
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
 
-/* FIX UTAMA: Agar input dan tombol lebarnya 100% sama rata */
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body {
@@ -211,7 +210,6 @@ h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px; width: 100%;} 
 .stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
 
-/* FIX INPUT & BUTTON RATA */
 input,select,textarea,button{
     font:inherit; border-radius:9px; padding:11px; width:100%; 
     margin:6px 0; background:#0a1020; color:var(--text); border:1px solid #344665;
@@ -225,15 +223,25 @@ button:hover{filter:brightness(1.2)}
 
 label{display:block;color:var(--muted);margin-top:8px}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--cyan)}
+
+/* TABEL STYLING */
+.table-responsive { width: 100%; overflow-x: auto; }
+table{width:100%;border-collapse:collapse;} 
+td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap; font-size: 14px;}
+th{color:var(--cyan)}
+
 .msg{padding:10px;background:#17334a;border-radius:8px;margin-bottom:12px; width: 100%; box-sizing: border-box;}.muted{color:var(--muted)}
 
-/* CSS PROFIL & AVATAR */
 .avatar-container{position:relative;display:inline-block; margin: 0 auto 15px auto;}
 .avatar{width:90px;height:90px;object-fit:cover;border-radius:50%;border:3px solid var(--cyan); background: #0a1020;}
 .edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:#000;font-size:14px;cursor:pointer;text-decoration:none}
 
 .music-btn {background: var(--pink); color: white; border: none; padding: 5px 10px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;}
+
+/* BUTTONS */
+.btn-edit { background: #f39c12; color: white; padding: 6px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; display:inline-block; margin-right: 5px; width: auto;}
+.btn-delete { background: #e74c3c; color: white; padding: 6px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; display:inline-block; width: auto;}
+.btn-add { background: #00ff88; color: #000; padding: 10px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; display:inline-block; width: auto; margin-bottom: 15px;}
 
 /* KHUSUS HALAMAN LOGIN (RATA TENGAH) */
 main.auth-main {
@@ -411,8 +419,6 @@ def logout():
 @login_required
 def dashboard():
     user = current_user()
-    
-    # --- LOGIKA DATA GRAFIK GARIS (AREA) ---
     txs = db().execute("SELECT kind, amount, entry_date FROM transactions WHERE user_id=? ORDER BY entry_date ASC, id ASC", (user["id"],)).fetchall()
     chart_labels = []
     chart_data = []
@@ -441,7 +447,6 @@ def dashboard():
     <h1>Dashboard</h1>
     <p class="muted" style="margin-bottom: 20px;">Selamat datang kembali, <strong>{user['display_name']}</strong>!</p>
 
-    <!-- SUSUNAN KOTAK LAMA (STATISTIK) -->
     <div class="grid">
         <div class="stat">
             <small>Total Pemasukan</small>
@@ -457,7 +462,6 @@ def dashboard():
         </div>
     </div>
 
-    <!-- KOTAK GRAFIK GAYA SAHAM/CRYPTO (TETAP BARU) -->
     <div class="panel" style="margin-top: 20px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
             <h2 style="margin:0;">Grafik Saldo</h2>
@@ -470,8 +474,6 @@ def dashboard():
 
     <script>
         const ctxChart = document.getElementById('financeChart').getContext('2d');
-        
-        // Membuat efek gradasi warna hijau transparan di bawah garis
         let gradient = ctxChart.createLinearGradient(0, 0, 0, 250);
         gradient.addColorStop(0, 'rgba(0, 255, 136, 0.4)');
         gradient.addColorStop(1, 'rgba(0, 255, 136, 0.0)');
@@ -500,30 +502,15 @@ def dashboard():
                 plugins: {{
                     legend: {{ display: false }},
                     tooltip: {{
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: '#11182b',
-                        titleColor: '#42e8ff',
-                        bodyColor: '#eaf3ff',
-                        borderColor: '#243454',
-                        borderWidth: 1
+                        mode: 'index', intersect: false, backgroundColor: '#11182b',
+                        titleColor: '#42e8ff', bodyColor: '#eaf3ff', borderColor: '#243454', borderWidth: 1
                     }}
                 }},
                 scales: {{
-                    x: {{
-                        grid: {{ display: false, drawBorder: false }},
-                        ticks: {{ color: '#9aabc5' }}
-                    }},
-                    y: {{
-                        grid: {{ color: '#243454', borderDash: [5, 5], drawBorder: false }},
-                        ticks: {{ color: '#9aabc5' }}
-                    }}
+                    x: {{ grid: {{ display: false, drawBorder: false }}, ticks: {{ color: '#9aabc5' }} }},
+                    y: {{ grid: {{ color: '#243454', borderDash: [5, 5], drawBorder: false }}, ticks: {{ color: '#9aabc5' }} }}
                 }},
-                interaction: {{
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
-                }}
+                interaction: {{ mode: 'nearest', axis: 'x', intersect: false }}
             }}
         }});
     </script>
@@ -554,7 +541,7 @@ def transactions():
         <input name="description" placeholder="Keterangan">
         <button>Tambah</button>
     </form>
-    <div style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th><th>Keterangan</th></tr>{rows}</table></div>
+    <div class="table-responsive" style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th><th>Keterangan</th></tr>{rows}</table></div>
     </div>"""
     return page("Keuangan", body)
 
@@ -582,7 +569,7 @@ def journal_page():
         <input name="notes" placeholder="Catatan">
         <button>Simpan</button>
     </form>
-    <div style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Pair</th><th>Plan</th><th>Hasil</th></tr>{rows}</table></div>
+    <div class="table-responsive" style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Pair</th><th>Plan</th><th>Hasil</th></tr>{rows}</table></div>
     </div>"""
     return page("Trading", body)
 
@@ -592,7 +579,6 @@ def evaluation_page():
     body = """<div class="panel"><h2>Evaluasi Otomatis</h2><p class="muted">Sistem telah memberikan evaluasi otomatis ke dalam catatan Anda di halaman Keuangan dan Trading.</p></div>"""
     return page("Evaluasi", body)
 
-# --- PERBAIKAN: ROUTE PROFIL DENGAN FITUR UPLOAD FOTO ---
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
@@ -600,13 +586,11 @@ def profile():
     if request.method == "POST":
         display = request.form.get("display_name")
         bio = request.form.get("bio")
-        photo = user["photo"] # Default ke foto lama
+        photo = user["photo"]
         
-        # Logika Upload Foto
         file = request.files.get("photo")
         if file and file.filename:
             filename = secure_filename(file.filename)
-            # Buat nama unik agar tidak bentrok
             filename = f"user_{user['id']}_{int(datetime.now().timestamp())}_{filename}"
             filepath = os.path.join(UPLOAD_DIR, filename)
             file.save(filepath)
@@ -622,30 +606,160 @@ def profile():
     body = f"""<div class="panel" style="max-width:400px; margin: 0 auto;">
     <h2>Profil Pengguna</h2>
     <form method="post" enctype="multipart/form-data">
-        
-        <!-- Tampilan Avatar Saat Ini -->
         <div style="text-align:center; margin-bottom: 15px;">
             <img src="{photo_url}" class="avatar" style="width: 100px; height: 100px;">
         </div>
-
         <label>Ganti Foto Profil (Opsional)</label>
         <input type="file" name="photo" accept="image/png, image/jpeg, image/webp">
-        
         <label>Nama Tampilan</label><input name="display_name" value="{user['display_name']}">
         <label>Bio</label><textarea name="bio">{user['bio'] or ''}</textarea>
         <button>Simpan Perubahan</button>
     </form></div>"""
     return page("Profil", body)
 
+# --- ROUTE ADMIN (CRUD & FINANCE MONITORING) ---
+
 @app.route("/admin")
 @admin_required
 def admin_page():
-    users = db().execute("SELECT * FROM users").fetchall()
-    rows = "".join([f"<tr><td>{u['id']}</td><td>{u['username']}</td><td>{u['role']}</td></tr>" for u in users])
-    body = f"""<div class="panel"><h2>Admin Panel</h2><table><tr><th>ID</th><th>Username</th><th>Role</th></tr>{rows}</table></div>"""
-    return page("Admin", body)
+    # Mengambil semua user beserta total pemasukan dan pengeluaran mereka
+    users = db().execute("""
+        SELECT u.*, 
+               (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = u.id AND kind = 'Pemasukan') as total_income,
+               (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = u.id AND kind = 'Pengeluaran') as total_expense
+        FROM users u ORDER BY u.id ASC
+    """).fetchall()
+    
+    rows = ""
+    for u in users:
+        # Format angka
+        income_fmt = f"Rp {u['total_income']:,.0f}"
+        expense_fmt = f"Rp {u['total_expense']:,.0f}"
+        
+        # Tombol aksi (Edit & Hapus)
+        actions = f"""
+        <a href="{url_for('admin_edit', user_id=u['id'])}" class="btn-edit">Edit</a>
+        """
+        # Cegah admin menghapus dirinya sendiri
+        if u['id'] != current_user()['id']:
+            actions += f"""<a href="{url_for('admin_delete', user_id=u['id'])}" class="btn-delete" onclick="return confirm('Yakin ingin menghapus member ini? Semua data transaksinya akan hilang.')">Hapus</a>"""
+            
+        rows += f"""
+        <tr>
+            <td>{u['id']}</td>
+            <td>{u['username']}</td>
+            <td>{u['display_name']}</td>
+            <td><strong style="color:var(--cyan);">{u['role'].upper()}</strong></td>
+            <td style="color:#00ff88;">{income_fmt}</td>
+            <td style="color:#ff4f4f;">{expense_fmt}</td>
+            <td>{actions}</td>
+        </tr>
+        """
 
-# ROUTE UNTUK MENAMPILKAN FOTO PROFIL (Upload)
+    body = f"""<div class="panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <h2 style="margin:0;">Admin Panel</h2>
+        <a href="{url_for('admin_add')}" class="btn-add">+ Tambah Member</a>
+    </div>
+    <div class="table-responsive">
+        <table>
+            <tr>
+                <th>ID</th><th>Username</th><th>Nama Tampilan</th>
+                <th>Role</th><th>Pemasukan</th><th>Pengeluaran</th><th>Aksi</th>
+            </tr>
+            {rows}
+        </table>
+    </div>
+    </div>"""
+    return page("Admin Panel", body)
+
+@app.route("/admin/add", methods=["GET", "POST"])
+@admin_required
+def admin_add():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        display = request.form.get("display_name", "").strip() or username
+        password = request.form.get("password", "")
+        role = request.form.get("role", "member")
+        
+        if len(username) < 3 or len(password) < 12:
+            flash("Username min 3 karakter, password min 12 karakter.")
+        else:
+            try:
+                db().execute("INSERT INTO users(username,password_hash,role,display_name) VALUES(?,?,?,?)", 
+                             (username, generate_password_hash(password), role, display))
+                db().commit()
+                flash("Member berhasil ditambahkan!")
+                return redirect(url_for("admin_page"))
+            except sqlite3.IntegrityError:
+                flash("Username sudah digunakan.")
+                
+    body = """<div class="panel" style="max-width:400px; margin: 0 auto;">
+    <h2>Tambah Member Baru</h2>
+    <form method="post">
+        <label>Username</label><input name="username" required minlength="3">
+        <label>Nama Tampilan</label><input name="display_name">
+        <label>Kata Sandi (min 12 karakter)</label><input type="password" name="password" required minlength="12">
+        <label>Role</label>
+        <select name="role">
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+        </select>
+        <button style="margin-top:20px;">Simpan Member</button>
+        <a href="{0}" style="display:block; text-align:center; margin-top:15px; color:var(--muted); text-decoration:none;">Batal</a>
+    </form></div>""".format(url_for('admin_page'))
+    return page("Tambah Member", body)
+
+@app.route("/admin/edit/<int:user_id>", methods=["GET", "POST"])
+@admin_required
+def admin_edit(user_id):
+    user = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        flash("User tidak ditemukan.")
+        return redirect(url_for("admin_page"))
+        
+    if request.method == "POST":
+        display = request.form.get("display_name")
+        role = request.form.get("role")
+        bio = request.form.get("bio", "")
+        
+        db().execute("UPDATE users SET display_name=?, role=?, bio=? WHERE id=?", (display, role, bio, user_id))
+        db().commit()
+        flash("Data member berhasil diperbarui!")
+        return redirect(url_for("admin_page"))
+        
+    body = f"""<div class="panel" style="max-width:400px; margin: 0 auto;">
+    <h2>Edit Member: {user['username']}</h2>
+    <form method="post">
+        <label>Nama Tampilan</label><input name="display_name" value="{user['display_name']}">
+        <label>Role</label>
+        <select name="role">
+            <option value="member" {'selected' if user['role']=='member' else ''}>Member</option>
+            <option value="admin" {'selected' if user['role']=='admin' else ''}>Admin</option>
+        </select>
+        <label>Bio</label><textarea name="bio">{user['bio'] or ''}</textarea>
+        <button style="margin-top:20px;">Simpan Perubahan</button>
+        <a href="{url_for('admin_page')}" style="display:block; text-align:center; margin-top:15px; color:var(--muted); text-decoration:none;">Batal</a>
+    </form></div>"""
+    return page("Edit Member", body)
+
+@app.route("/admin/delete/<int:user_id>")
+@admin_required
+def admin_delete(user_id):
+    if user_id == current_user()['id']:
+        flash("Anda tidak bisa menghapus akun Anda sendiri!")
+        return redirect(url_for("admin_page"))
+        
+    # Hapus transaksi & jurnal terlebih dahulu (mencegah error foreign key)
+    db().execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
+    db().execute("DELETE FROM journal WHERE user_id=?", (user_id,))
+    # Hapus user
+    db().execute("DELETE FROM users WHERE id=?", (user_id,))
+    db().commit()
+    
+    flash("Member berhasil dihapus.")
+    return redirect(url_for("admin_page"))
+
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
