@@ -170,15 +170,45 @@ TEMPLATE = r"""
 <title>{{ title }} • AlZzz Web</title>
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif; position: relative; z-index: 0; overflow-x: hidden;}
-header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative; z-index: 10; background: #080b18cc; backdrop-filter: blur(5px);}
+
+/* PERBAIKAN BACKGROUND & LAYER */
+html {
+    background: radial-gradient(circle at top,#142444 0,#080b18 48%);
+    height: 100%;
+}
+body {
+    margin: 0;
+    background: transparent; /* Dibuat transparan agar canvas terlihat */
+    color: var(--text);
+    font: 15px Arial,sans-serif;
+    overflow-x: hidden;
+}
+
+/* LAYER KONTEN DI ATAS CANVAS */
+header, main, footer {
+    position: relative;
+    z-index: 10; 
+}
+
+/* PANEL & TABEL 100% SOLID (PEKAT) */
+.panel, .stat {
+    background: #11182b; /* Warna solid, tidak tembus pandang */
+    border: 2px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 16px;
+    animation: neon-glow 4s linear infinite;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.8); /* Bayangan tebal agar terpisah dari background */
+}
+
+header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center; background: #080b18cc; backdrop-filter: blur(5px);}
 .header-left { display: flex; align-items: center; gap: 10px; }
 .logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
 .hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
 .menu-dropdown{display:none;position:absolute;top:60px;right:5%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:100;box-shadow:0 10px 30px #0008;min-width:200px}
 .menu-dropdown a{display:block;padding:10px;color:var(--text);text-decoration:none;border-radius:8px}
 .menu-dropdown a:hover{background:#243454;color:var(--cyan)}
-main{max-width:1050px;margin:28px auto;padding:0 16px; position: relative; z-index: 10;}
+main{max-width:1050px;margin:28px auto;padding:0 16px;}
 h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
 input,select,textarea,button{font:inherit;border-radius:9px;padding:11px;width:100%;margin:6px 0;background:#0a1020;color:var(--text);border:1px solid #344665}
@@ -191,20 +221,8 @@ table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{te
 .edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:25px;height:25px;display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;cursor:pointer;text-decoration:none}
 .edit-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;width:auto;margin:0}
 .btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
-footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-index: 10;}
+footer{text-align:center;color:var(--muted);padding:30px;}
 
-/* PANEL DIBUAT SOLID AGAR TULISAN TIDAK TEMBUS PANDANG */
-.panel, .stat {
-    background: #11182b; /* Warna solid, bukan transparan */
-    border: 2px solid var(--line);
-    border-radius: 14px;
-    padding: 18px;
-    margin-bottom: 16px;
-    animation: neon-glow 4s linear infinite;
-    position: relative;
-    z-index: 20;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5); /* Tambahan bayangan agar terlihat menonjol */
-}
 @keyframes neon-glow {
     0%, 100% { box-shadow: 0 0 10px #42e8ff, inset 0 0 5px #42e8ff; border-color: #42e8ff; }
     25% { box-shadow: 0 0 10px #ff4fd8, inset 0 0 5px #ff4fd8; border-color: #ff4fd8; }
@@ -218,10 +236,11 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;
 }
 
+/* CANVAS DIPOSISIKAN DI PALING BELAKANG */
 #bg-graph {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
-    z-index: -1;
+    z-index: 1; 
     pointer-events: none;
 }
 </style></head><body>
@@ -264,7 +283,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     let width, height;
     let time = 0;
     
-    // Array untuk Koin Bitcoin
     const coins = [];
 
     function resize() {
@@ -274,14 +292,14 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     window.addEventListener('resize', resize);
     resize();
 
-    // Inisialisasi Koin Bitcoin
-    for (let i = 0; i < 20; i++) {
+    // Inisialisasi Koin Bitcoin (lebih banyak dan lebih besar)
+    for (let i = 0; i < 30; i++) {
         coins.push({
             x: Math.random() * window.innerWidth,
             y: Math.random() * window.innerHeight,
-            speed: 1 + Math.random() * 2.5,
-            size: 15 + Math.random() * 25,
-            opacity: 0.1 + Math.random() * 0.4
+            speed: 1 + Math.random() * 2,
+            size: 20 + Math.random() * 30,
+            opacity: 0.1 + Math.random() * 0.3
         });
     }
 
@@ -289,11 +307,11 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
         ctx.clearRect(0, 0, width, height);
         time += 0.02; 
 
-        // 1. Gambar Gelombang (Cyan & Pink)
+        // 1. Gambar Gelombang
         const colors = ['rgba(66, 232, 255,', 'rgba(255, 79, 216,'];
         for(let j=0; j<2; j++) {
             ctx.beginPath();
-            ctx.strokeStyle = colors[j] + ' 0.4)'; 
+            ctx.strokeStyle = colors[j] + ' 0.3)'; 
             ctx.lineWidth = 2;
 
             let points = [];
@@ -314,7 +332,7 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
             ctx.lineTo(0, height);
             ctx.closePath();
             let gradient = ctx.createLinearGradient(0, 0, 0, height);
-            gradient.addColorStop(0, colors[j] + ' 0.15)');
+            gradient.addColorStop(0, colors[j] + ' 0.1)');
             gradient.addColorStop(1, colors[j] + ' 0)');
             ctx.fillStyle = gradient;
             ctx.fill();
@@ -327,10 +345,8 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
             ctx.textAlign = "center";
             ctx.fillText("₿", c.x, c.y);
 
-            // Pergerakan koin naik ke atas
-            c.y -= c.speed;
+            c.y -= c.speed; // Naik ke atas
             
-            // Jika koin keluar layar atas, reset ke bawah
             if (c.y < -50) {
                 c.y = height + 50;
                 c.x = Math.random() * width;
@@ -340,7 +356,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
         requestAnimationFrame(draw);
     }
     draw();
-    // ------------------------------------------
 
     // --- SCRIPT MUSIK YOUTUBE (PERSISTEN) ---
     var player;
@@ -381,7 +396,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
         }
     }
 
-    // TRIK PAMUNGKAS: Menyentuh layar akan memaksa musik nyala jika diblokir browser
     document.body.addEventListener('click', function() {
         if (isPlaying && player && player.getPlayerState && player.getPlayerState() !== 1) {
             player.playVideo();
