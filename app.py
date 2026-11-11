@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 from functools import wraps
 from datetime import date, datetime
 from flask import Flask, g, request, redirect, url_for, session, flash, render_template_string, get_flashed_messages, send_from_directory
@@ -154,7 +155,7 @@ TEMPLATE = r"""
 <!doctype html><html lang="id"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ title }} • AlZzz Web</title>
-<!-- Load Chart.js untuk Grafik Warna -->
+<!-- Load Chart.js untuk Grafik -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
@@ -410,23 +411,42 @@ def logout():
 @login_required
 def dashboard():
     user = current_user()
-    # Mengambil data transaksi untuk Grafik
-    txs = db().execute("SELECT kind, SUM(amount) as total FROM transactions WHERE user_id=? GROUP BY kind", (user["id"],)).fetchall()
-    income = 0
-    expense = 0
-    for t in txs:
-        if t["kind"] == "Pemasukan": income = t["total"]
-        elif t["kind"] == "Pengeluaran": expense = t["total"]
-        
+    
+    # --- LOGIKA DATA GRAFIK GARIS (AREA) ---
+    txs = db().execute("SELECT kind, amount, entry_date FROM transactions WHERE user_id=? ORDER BY entry_date ASC, id ASC", (user["id"],)).fetchall()
+    chart_labels = []
+    chart_data = []
+    current_balance = 0
+    total_income = 0
+    total_expense = 0
+    
+    if not txs:
+        # Data dummy jika belum ada transaksi agar grafik tetap tampil
+        chart_labels = ['Belum Ada Data']
+        chart_data = [0]
+    else:
+        for t in txs:
+            if t["kind"] == "Pemasukan":
+                current_balance += t["amount"]
+                total_income += t["amount"]
+            else:
+                current_balance -= t["amount"]
+                total_expense += t["amount"]
+            chart_labels.append(t["entry_date"])
+            chart_data.append(current_balance)
+            
+    chart_labels_json = json.dumps(chart_labels)
+    chart_data_json = json.dumps(chart_data)
+
     photo_url = url_for('uploaded_file', filename=user['photo']) if user['photo'] else 'https://ui-avatars.com/api/?name=' + user['display_name'] + '&background=42e8ff&color=000'
 
     body = f"""
     <div class="grid" style="margin-bottom: 20px;">
-        <!-- KOTAK PROFIL -->
+        <!-- KOTAK PROFIL (FITUR EDIT TETAP ADA) -->
         <div class="panel" style="margin: 0; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center;">
             <div class="avatar-container">
                 <img src="{photo_url}" class="avatar" alt="Profile">
-                <a href="{url_for('profile')}" class="edit-icon">✏️</a>
+                <a href="{url_for('profile')}" class="edit-icon" title="Edit Profil">✏️</a>
             </div>
             <h3 style="margin: 0; color: var(--cyan);">{user['display_name']}</h3>
             <p class="muted" style="margin: 5px 0 0 0;">Role: {user['role'].upper()}</p>
@@ -434,50 +454,80 @@ def dashboard():
 
         <!-- KOTAK RINGKASAN -->
         <div class="panel" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-            <h2>Ringkasan Bulan Ini</h2>
+            <h2>Ringkasan Saldo</h2>
             <div style="display:flex; justify-content: space-between; margin-top: 10px;">
-                <div><small class="muted">Pemasukan</small><br><strong style="color:#00ff88;">Rp {income:,.0f}</strong></div>
-                <div><small class="muted">Pengeluaran</small><br><strong style="color:#ff4f4f;">Rp {expense:,.0f}</strong></div>
+                <div><small class="muted">Pemasukan</small><br><strong style="color:#00ff88;">Rp {total_income:,.0f}</strong></div>
+                <div><small class="muted">Pengeluaran</small><br><strong style="color:#ff4f4f;">Rp {total_expense:,.0f}</strong></div>
             </div>
         </div>
     </div>
 
-    <!-- KOTAK GRAFIK WARNA-WARNI -->
+    <!-- KOTAK GRAFIK GAYA SAHAM/CRYPTO -->
     <div class="panel">
-        <h2>Grafik Keuangan</h2>
-        <div style="width: 100%; max-width: 400px; margin: 0 auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+            <h2 style="margin:0;">Grafik Keuangan</h2>
+            <span style="color:var(--cyan); font-size:12px; border:1px solid var(--cyan); padding:4px 8px; border-radius:20px;">1D</span>
+        </div>
+        <div style="width: 100%; height: 250px;">
             <canvas id="financeChart"></canvas>
         </div>
     </div>
 
     <script>
-        // Script untuk menampilkan Grafik Warna-warni
         const ctxChart = document.getElementById('financeChart').getContext('2d');
+        
+        // Membuat efek gradasi warna hijau transparan di bawah garis
+        let gradient = ctxChart.createLinearGradient(0, 0, 0, 250);
+        gradient.addColorStop(0, 'rgba(0, 255, 136, 0.4)'); // Hijau transparan di atas
+        gradient.addColorStop(1, 'rgba(0, 255, 136, 0.0)'); // Hilang di bawah
+
         new Chart(ctxChart, {{
-            type: 'doughnut',
+            type: 'line',
             data: {{
-                labels: ['Pemasukan', 'Pengeluaran'],
+                labels: {chart_labels_json},
                 datasets: [{{
-                    data: [{income if income > 0 else 1}, {expense if expense > 0 else 1}], // Dummy data 1 jika kosong agar chart muncul
-                    backgroundColor: [
-                        'rgba(0, 255, 136, 0.8)', // Hijau
-                        'rgba(255, 79, 216, 0.8)'  // Pink
-                    ],
-                    borderColor: [
-                        '#00ff88',
-                        '#ff4fd8'
-                    ],
-                    borderWidth: 2,
-                    hoverOffset: 10
+                    label: 'Total Saldo',
+                    data: {chart_data_json},
+                    borderColor: '#00ff88', // Warna garis hijau
+                    borderWidth: 3,
+                    backgroundColor: gradient,
+                    fill: true, // Mengisi area di bawah garis
+                    tension: 0.4, // Membuat garis melengkung halus (smooth)
+                    pointRadius: 0, // Titik tidak terlihat (seperti di gambar)
+                    pointHoverRadius: 6, // Titik muncul saat di-hover
+                    pointBackgroundColor: '#00ff88',
+                    pointBorderColor: '#fff'
                 }}]
             }},
             options: {{
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {{
-                    legend: {{
-                        position: 'bottom',
-                        labels: {{ color: '#eaf3ff', font: {{ family: 'Arial', size: 14 }} }}
+                    legend: {{ display: false }}, // Hilangkan legend
+                    tooltip: {{
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: '#11182b',
+                        titleColor: '#42e8ff',
+                        bodyColor: '#eaf3ff',
+                        borderColor: '#243454',
+                        borderWidth: 1
                     }}
+                }},
+                scales: {{
+                    x: {{
+                        grid: {{ display: false, drawBorder: false }}, // Hilangkan garis grid vertikal
+                        ticks: {{ color: '#9aabc5' }}
+                    }},
+                    y: {{
+                        grid: {{ color: '#243454', borderDash: [5, 5], drawBorder: false }}, // Garis grid horizontal putus-putus
+                        ticks: {{ color: '#9aabc5' }}
+                    }}
+                }},
+                interaction: {{
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
                 }}
             }}
         }});
