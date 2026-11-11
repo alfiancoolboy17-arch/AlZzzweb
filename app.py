@@ -12,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.environ.get("DATABASE_PATH"):
     DB_PATH = os.environ.get("DATABASE_PATH")
 elif os.path.exists("/data"):
-    DB_PATH = "/data/alzzz.db" # Otomatis dipakai jika di Netrun
+    DB_PATH = "/data/alzzz_baru.db" # Otomatis dipakai jika di Netrun
 else:
     DB_PATH = os.path.join(BASE_DIR, "alzzz.db") # Dipakai di Termux lokal
 # -------------------------------------------------------------------
