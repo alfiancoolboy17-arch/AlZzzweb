@@ -12,9 +12,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.environ.get("DATABASE_PATH"):
     DB_PATH = os.environ.get("DATABASE_PATH")
 elif os.path.exists("/data"):
-    DB_PATH = "/data/alzzz_baru.db" # Otomatis dipakai jika di Netrun
+    DB_PATH = "/data/alzzz_baru.db" # Menggunakan nama baru agar bersih dari error
 else:
-    DB_PATH = os.path.join(BASE_DIR, "alzzz.db") # Dipakai di Termux lokal
+    DB_PATH = os.path.join(BASE_DIR, "alzzz.db") 
 # -------------------------------------------------------------------
 
 UPLOAD_DIR = os.path.join(BASE_DIR, "static_uploads")
@@ -22,9 +22,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
-# --- KUNCI RAHASIA OTOMATIS (Tidak akan error lagi) ---
+# --- KUNCI RAHASIA OTOMATIS ---
 app.secret_key = os.environ.get("ALZZZ_SECRET", "Admin1701")
-# ------------------------------------------------------
+# ------------------------------
 
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
@@ -73,12 +73,27 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
     
-    # --- KODE ANTI HILANG DATA: Otomatis tambah kolom bio jika belum ada ---
+    # --- KODE ANTI HILANG DATA ---
     try:
         conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
     except sqlite3.OperationalError:
         pass 
-    # ----------------------------------------------------------------------
+    # -----------------------------
+
+    # --- KODE OTOMATIS BUAT AKUN ADMIN (BARU) ---
+    try:
+        # Cek apakah user AlZzz sudah ada
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ?", ("AlZzz",))
+        if not cursor.fetchone():
+            # Jika belum ada, buat otomatis
+            hashed_pw = generate_password_hash("Alfian170103")
+            conn.execute("INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+                         ("AlZzz", hashed_pw, "admin", "AlZzz"))
+            print("Akun Admin 'AlZzz' berhasil dibuat otomatis.")
+    except Exception as e:
+        print("Gagal membuat admin otomatis:", e)
+    # --------------------------------------------
 
     conn.commit()
     conn.close()
@@ -173,7 +188,6 @@ table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{te
 .btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
 footer{text-align:center;color:var(--muted);padding:30px}
 
-/* ANIMASI LAMPU NEON WARNA WARNI PADA KOTAK */
 .panel, .stat {
     background: #11182bee;
     border: 2px solid var(--line);
@@ -321,7 +335,6 @@ def dashboard():
     <script>
     new Chart(document.getElementById('chart'),{type:'bar',data:{labels:['Pemasukan','Pengeluaran'],datasets:[{label:'Rupiah',data:[{{income}},{{expense}}]}]},options:{responsive:true,plugins:{legend:{display:false}}}});
     
-    // Fitur Suara Sambutan
     window.onload = function() {
         if ('speechSynthesis' in window) {
             var namaUser = "{{ user.display_name|safe }}";
@@ -330,7 +343,6 @@ def dashboard():
             speech.lang = 'id-ID'; 
             speech.rate = 0.9; 
             speech.pitch = 1; 
-            
             setTimeout(function() {
                 window.speechSynthesis.speak(speech);
             }, 500);
