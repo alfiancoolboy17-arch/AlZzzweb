@@ -171,7 +171,6 @@ TEMPLATE = r"""
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
 
-/* PERBAIKAN TOTAL LAYOUT & LAYER */
 html, body {
     margin: 0; padding: 0; width: 100%; min-height: 100vh;
     background: radial-gradient(circle at top,#142444 0,#080b18 48%);
@@ -184,59 +183,63 @@ html, body {
 #bg-graph {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    z-index: 1; /* Paling bawah */
+    z-index: 1; 
     pointer-events: none;
 }
 
-/* 2. Header & Main di atas Canvas */
+/* 2. Header di atas Canvas */
 header {
     position: relative;
-    z-index: 50; /* Di atas canvas, di bawah dropdown */
+    z-index: 50; 
     padding: 15px 5%;
     border-bottom: 1px solid var(--line);
     display: flex; justify-content: space-between; align-items: center;
-    background: #080b18; /* Solid background untuk header */
+    background: #080b18; /* Solid background */
 }
 
-/* 3. Main content (Membuat semua isi ke tengah) */
+/* 3. Main Container (Tanpa Flex agar layout lain tidak rusak) */
 main {
     position: relative;
-    z-index: 10; /* Di atas canvas */
+    z-index: 10; 
     max-width: 1050px;
-    margin: 28px auto;
-    padding: 0 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center; /* Kunci agar kotak login ke tengah */
-    width: 100%;
+    margin: 0 auto;
+    padding: 28px 16px;
     box-sizing: border-box;
 }
 
-/* 4. Panel / Tabel 100% PEKAT (Solid) */
+/* 4. LAYOUT KHUSUS LOGIN TENGAH (Menggunakan Flexbox) */
+.auth-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 70vh; /* Menempatkan tepat di tengah layar secara vertikal */
+    width: 100%;
+}
+
+/* 5. Panel / Tabel 100% PEKAT (Solid) */
 .panel, .stat {
-    background: #11182b; /* Warna solid, tidak ada transparansi */
+    background: #11182b; 
     border: 2px solid var(--line);
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 16px;
-    width: 100%; /* Agar penuh di dalam main */
-    box-sizing: border-box;
     position: relative;
     z-index: 20;
     animation: neon-glow 4s linear infinite;
     box-shadow: 0 4px 15px rgba(0,0,0,0.8);
+    box-sizing: border-box;
 }
 
-/* 5. Menu Dropdown 100% PEKAT */
+/* 6. Menu Dropdown 100% PEKAT */
 .menu-dropdown {
     display: none;
     position: absolute;
     top: 60px; right: 5%;
-    background: #11182b; /* Solid background */
+    background: #11182b; 
     border: 1px solid var(--line);
     border-radius: 10px;
     padding: 10px;
-    z-index: 999; /* Paling tinggi agar menutupi segalanya */
+    z-index: 999; 
     box-shadow: 0 10px 30px rgba(0,0,0,0.9);
     min-width: 200px;
 }
@@ -308,7 +311,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
 <div id="yt-player" style="display:none;"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    // --- GRAFIK AREA & BITCOIN BERGERAK ---
     const canvas = document.getElementById('bg-graph');
     const ctx = canvas.getContext('2d');
     let width, height;
@@ -383,7 +385,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     }
     draw();
 
-    // --- SCRIPT MUSIK ---
     var player;
     var isPlaying = localStorage.getItem('musicPlaying') === 'true';
 
@@ -462,12 +463,11 @@ def setup():
             db().commit()
             flash("Admin berhasil dibuat. Silakan login.")
             return redirect(url_for("login"))
-    # Menambahkan styling max-width agar pas di tengah
-    body = """<div class="panel" style="max-width:400px;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
+    body = """<div class="auth-container"><div class="panel" style="max-width:400px; width:100%;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
     <form method="post"><label>Username admin</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name">
     <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
-    <button>Buat admin</button></form></div>"""
+    <button>Buat admin</button></form></div></div>"""
     return page("Setup", body)
 
 @app.route("/login", methods=["GET", "POST"])
@@ -480,13 +480,14 @@ def login():
             session["user_id"] = user["id"]
             return redirect(url_for("dashboard"))
         flash("Username atau kata sandi tidak cocok.")
-    # Menambahkan styling max-width dan margin agar pas di tengah
-    body = """<div class="panel" style="max-width:350px; margin: 50px auto;"><h1 style="text-align:center;">LOGIN</h1>
+    
+    # PENGGUNAAN AUTH-CONTAINER UNTUK MENENGAHKAN KOTAK
+    body = """<div class="auth-container"><div class="panel" style="max-width:350px; width:100%;"><h1 style="text-align:center;">LOGIN</h1>
     <form method="post"><label>Username</label><input name="username" required>
     <label>Kata sandi</label><input type="password" name="password" required>
     <button>Masuk</button></form>
     <p style="text-align:center; margin-top:15px; font-size:14px;">Belum punya akun? <a href="{{url_for('register')}}" style="color:var(--cyan); text-decoration:none;">Daftar di sini</a></p>
-    </div>"""
+    </div></div>"""
     return page("Login", body)
 
 @app.route("/register", methods=["GET", "POST"])
@@ -510,8 +511,7 @@ def register():
             except sqlite3.IntegrityError:
                 flash("Username sudah digunakan. Silakan pilih yang lain.")
                 
-    # Menambahkan styling max-width dan margin agar pas di tengah
-    body = """<div class="panel" style="max-width:380px; margin: 50px auto;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    body = """<div class="auth-container"><div class="panel" style="max-width:380px; width:100%;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
     <p class="muted" style="text-align:center;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
         <label>Username</label><input name="username" required minlength="3">
@@ -520,7 +520,7 @@ def register():
         <button>Daftar Sekarang</button>
     </form>
     <p style="text-align:center; margin-top:15px; font-size:14px;">Sudah punya akun? <a href="{{url_for('login')}}" style="color:var(--cyan); text-decoration:none;">Login di sini</a></p>
-    </div>"""
+    </div></div>"""
     return page("Daftar", body)
 
 @app.route("/logout")
@@ -540,7 +540,7 @@ def dashboard():
     expense = next((r["total"] for r in totals if r["kind"] == "Pengeluaran"), 0)
     recent = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 8",(user["id"],)).fetchall()
     
-    body = """<h1 style="width:100%;">Dashboard</h1><p class="muted" style="width:100%;">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
+    body = """<h1>Dashboard</h1><p class="muted">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
     <div class="grid"><div class="stat"><small>Total pemasukan</small><strong>Rp {{'{:,.0f}'.format(income)}}</strong></div>
     <div class="stat"><small>Total pengeluaran</small><strong>Rp {{'{:,.0f}'.format(expense)}}</strong></div>
     <div class="stat"><small>Selisih</small><strong>Rp {{'{:,.0f}'.format(income-expense)}}</strong></div></div>
@@ -723,7 +723,8 @@ def profile():
         return redirect(url_for("profile"))
         
     body = """
-    <div class="panel" style="text-align:center; position:relative; max-width: 500px;">
+    <div class="auth-container" style="min-height:auto; margin-top:20px;">
+    <div class="panel" style="text-align:center; position:relative; max-width: 500px; width: 100%;">
         <div class="avatar-container">
             {% if user.photo %}
                 <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
@@ -741,8 +742,9 @@ def profile():
             <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
         </div>
     </div>
+    </div>
 
-    <div id="photoForm" class="panel" style="display:none; max-width: 500px;">
+    <div id="photoForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
         <h2>Ubah Foto Profil</h2>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="action" value="update_photo">
@@ -751,7 +753,7 @@ def profile():
         </form>
     </div>
 
-    <div id="bioForm" class="panel" style="display:none; max-width: 500px;">
+    <div id="bioForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
         <h2>Ubah Bio</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_bio">
@@ -760,7 +762,7 @@ def profile():
         </form>
     </div>
 
-    <div id="credForm" class="panel" style="display:none; max-width: 500px;">
+    <div id="credForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
         <h2>Ubah Nama & Sandi</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_credentials">
