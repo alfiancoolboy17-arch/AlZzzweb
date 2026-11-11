@@ -274,7 +274,7 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 65vh;
+    min-height: 75vh;
     width: 100%;
 }
 </style></head><body>
@@ -464,8 +464,7 @@ def setup():
             flash("Admin berhasil dibuat. Silakan login.")
             return redirect(url_for("login"))
     
-    # MENGGUNAKAN WRAPPER SAKTI
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:400px; width:100%; margin:0;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
+    body = """<div class="login-wrapper"><div class="panel" style="max-width:320px; width:100%; margin:0;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
     <form method="post"><label>Username admin</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name">
     <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
@@ -483,12 +482,12 @@ def login():
             return redirect(url_for("dashboard"))
         flash("Username atau kata sandi tidak cocok.")
     
-    # MENGGUNAKAN WRAPPER SAKTI
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:350px; width:100%; margin:0;"><h1 style="text-align:center;">LOGIN</h1>
+    # UKURAN DIKECILKAN (max-width: 280px)
+    body = """<div class="login-wrapper"><div class="panel" style="max-width:280px; width:100%; margin:0;"><h1 style="text-align:center;">LOGIN</h1>
     <form method="post"><label>Username</label><input name="username" required>
     <label>Kata sandi</label><input type="password" name="password" required>
     <button>Masuk</button></form>
-    <p style="text-align:center; margin-top:15px; font-size:14px;">Belum punya akun? <a href="{{url_for('register')}}" style="color:var(--cyan); text-decoration:none;">Daftar di sini</a></p>
+    <p style="text-align:center; margin-top:15px; font-size:12px;">Belum punya akun? <a href="{{url_for('register')}}" style="color:var(--cyan); text-decoration:none;">Daftar di sini</a></p>
     </div></div>"""
     return page("Login", body)
 
@@ -513,16 +512,16 @@ def register():
             except sqlite3.IntegrityError:
                 flash("Username sudah digunakan. Silakan pilih yang lain.")
                 
-    # MENGGUNAKAN WRAPPER SAKTI
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:380px; width:100%; margin:0;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
-    <p class="muted" style="text-align:center;">Buat akun untuk mulai mencatat keuanganmu.</p>
+    # UKURAN DIKECILKAN (max-width: 300px)
+    body = """<div class="login-wrapper"><div class="panel" style="max-width:300px; width:100%; margin:0;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    <p class="muted" style="text-align:center; font-size:12px;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
         <label>Username</label><input name="username" required minlength="3">
         <label>Nama Tampilan (Opsional)</label><input name="display_name">
         <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
         <button>Daftar Sekarang</button>
     </form>
-    <p style="text-align:center; margin-top:15px; font-size:14px;">Sudah punya akun? <a href="{{url_for('login')}}" style="color:var(--cyan); text-decoration:none;">Login di sini</a></p>
+    <p style="text-align:center; margin-top:15px; font-size:12px;">Sudah punya akun? <a href="{{url_for('login')}}" style="color:var(--cyan); text-decoration:none;">Login di sini</a></p>
     </div></div>"""
     return page("Daftar", body)
 
@@ -727,7 +726,7 @@ def profile():
         
     body = """
     <div style="display: flex; justify-content: center; width: 100%; margin-bottom: 20px;">
-        <div class="panel" style="text-align:center; position:relative; max-width: 500px; width: 100%; margin: 0;">
+        <div class="panel" style="text-align:center; position:relative; max-width: 400px; width: 100%; margin: 0;">
             <div class="avatar-container">
                 {% if user.photo %}
                     <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
@@ -747,7 +746,7 @@ def profile():
         </div>
     </div>
 
-    <div id="photoForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
+    <div id="photoForm" class="panel" style="display:none; max-width: 400px; margin: 0 auto 16px auto;">
         <h2>Ubah Foto Profil</h2>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="action" value="update_photo">
@@ -756,7 +755,7 @@ def profile():
         </form>
     </div>
 
-    <div id="bioForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
+    <div id="bioForm" class="panel" style="display:none; max-width: 400px; margin: 0 auto 16px auto;">
         <h2>Ubah Bio</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_bio">
@@ -765,7 +764,7 @@ def profile():
         </form>
     </div>
 
-    <div id="credForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
+    <div id="credForm" class="panel" style="display:none; max-width: 400px; margin: 0 auto 16px auto;">
         <h2>Ubah Nama & Sandi</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_credentials">
