@@ -170,7 +170,7 @@ TEMPLATE = r"""
 <title>{{ title }} • AlZzz Web</title>
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif; position: relative; z-index: 0;}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif; position: relative; z-index: 0; overflow-x: hidden;}
 header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative; z-index: 10; background: #080b18cc; backdrop-filter: blur(5px);}
 .header-left { display: flex; align-items: center; gap: 10px; }
 .logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
@@ -219,7 +219,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
     z-index: -1;
-    opacity: 0.15;
     pointer-events: none;
 }
 </style></head><body>
@@ -256,48 +255,69 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
 <div id="yt-player" style="display:none;"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    // --- GRAFIK BERGERAK ---
+    // --- GRAFIK AREA BERGERAK (TRADING STYLE) ---
     const canvas = document.getElementById('bg-graph');
     const ctx = canvas.getContext('2d');
     let width, height;
-    let points = [];
+    let time = 0;
+
     function resize() {
         width = canvas.width = window.innerWidth;
         height = canvas.height = window.innerHeight;
-        points = [];
-        for(let i=0; i<width; i+=20) {
-            points.push({x: i, y: height/2 + (Math.random() - 0.5) * 100});
-        }
     }
     window.addEventListener('resize', resize);
     resize();
-    let offset = 0;
+
     function draw() {
         ctx.clearRect(0, 0, width, height);
-        ctx.beginPath(); ctx.strokeStyle = '#42e8ff'; ctx.lineWidth = 2;
-        offset += 1; 
-        for(let i=0; i<points.length; i++) {
-            let y = height/2 + Math.sin((i + offset*0.05)*0.02) * 150 + Math.cos((i + offset*0.02)*0.05) * 50;
-            if(i === 0) ctx.moveTo(points[i].x, y); else ctx.lineTo(points[i].x, y);
+        time += 0.02; // Kecepatan gerak
+
+        // Gambar 2 Gelombang (Cyan dan Pink)
+        const colors = ['rgba(66, 232, 255,', 'rgba(255, 79, 216,'];
+        
+        for(let j=0; j<2; j++) {
+            ctx.beginPath();
+            ctx.strokeStyle = colors[j] + ' 0.5)'; // Garis agak transparan
+            ctx.lineWidth = 3;
+
+            let points = [];
+            for(let x=0; x <= width; x+=10) {
+                // Rumus gelombang kombinasi Sin dan Cos
+                let y = height/2 
+                      + Math.sin((x * 0.005) + time + j) * 100 
+                      + Math.cos((x * 0.01) + (time * 1.5) + j) * 50;
+                points.push({x: x, y: y});
+            }
+
+            // Gambar Garis
+            points.forEach((p, i) => {
+                if(i===0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+            });
+            ctx.stroke();
+
+            // Gambar Area Gradien di bawah garis
+            ctx.lineTo(width, height);
+            ctx.lineTo(0, height);
+            ctx.closePath();
+            let gradient = ctx.createLinearGradient(0, 0, 0, height);
+            gradient.addColorStop(0, colors[j] + ' 0.15)');
+            gradient.addColorStop(1, colors[j] + ' 0)');
+            ctx.fillStyle = gradient;
+            ctx.fill();
         }
-        ctx.stroke();
-        ctx.beginPath(); ctx.strokeStyle = '#ff4fd8';
-        for(let i=0; i<points.length; i++) {
-            let y = height/2 + Math.cos((i + offset*0.03)*0.03) * 120 + Math.sin((i + offset*0.01)*0.04) * 60;
-            if(i === 0) ctx.moveTo(points[i].x, y); else ctx.lineTo(points[i].x, y);
-        }
-        ctx.stroke();
+
         requestAnimationFrame(draw);
     }
     draw();
+    // ------------------------------------------
 
     // --- SCRIPT MUSIK YOUTUBE (PERSISTEN) ---
     var player;
     var isPlaying = localStorage.getItem('musicPlaying') === 'true';
-    var btn;
 
     function onYouTubeIframeAPIReady() {
-        btn = document.getElementById("playBtn");
+        var btn = document.getElementById("playBtn");
         if(btn) btn.innerHTML = isPlaying ? "⏸️ Pause DJ" : "🎵 Play DJ";
 
         player = new YT.Player('yt-player', {
@@ -331,8 +351,7 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
         }
     }
 
-    // TRIK PAMUNGKAS: Jika musik ingin nyala tapi diblokir browser saat pindah halaman,
-    // musik akan otomatis nyala saat layar disentuh (di-klik) di mana saja.
+    // TRIK PAMUNGKAS: Menyentuh layar akan memaksa musik nyala jika diblokir browser
     document.body.addEventListener('click', function() {
         if (isPlaying && player && player.getPlayerState && player.getPlayerState() !== 1) {
             player.playVideo();
