@@ -421,7 +421,6 @@ def dashboard():
     total_expense = 0
     
     if not txs:
-        # Data dummy jika belum ada transaksi agar grafik tetap tampil
         chart_labels = ['Belum Ada Data']
         chart_data = [0]
     else:
@@ -438,34 +437,30 @@ def dashboard():
     chart_labels_json = json.dumps(chart_labels)
     chart_data_json = json.dumps(chart_data)
 
-    photo_url = url_for('uploaded_file', filename=user['photo']) if user['photo'] else 'https://ui-avatars.com/api/?name=' + user['display_name'] + '&background=42e8ff&color=000'
-
     body = f"""
-    <div class="grid" style="margin-bottom: 20px;">
-        <!-- KOTAK PROFIL (FITUR EDIT TETAP ADA) -->
-        <div class="panel" style="margin: 0; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-            <div class="avatar-container">
-                <img src="{photo_url}" class="avatar" alt="Profile">
-                <a href="{url_for('profile')}" class="edit-icon" title="Edit Profil">✏️</a>
-            </div>
-            <h3 style="margin: 0; color: var(--cyan);">{user['display_name']}</h3>
-            <p class="muted" style="margin: 5px 0 0 0;">Role: {user['role'].upper()}</p>
-        </div>
+    <h1>Dashboard</h1>
+    <p class="muted" style="margin-bottom: 20px;">Selamat datang kembali, <strong>{user['display_name']}</strong>!</p>
 
-        <!-- KOTAK RINGKASAN -->
-        <div class="panel" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-            <h2>Ringkasan Saldo</h2>
-            <div style="display:flex; justify-content: space-between; margin-top: 10px;">
-                <div><small class="muted">Pemasukan</small><br><strong style="color:#00ff88;">Rp {total_income:,.0f}</strong></div>
-                <div><small class="muted">Pengeluaran</small><br><strong style="color:#ff4f4f;">Rp {total_expense:,.0f}</strong></div>
-            </div>
+    <!-- SUSUNAN KOTAK LAMA (STATISTIK) -->
+    <div class="grid">
+        <div class="stat">
+            <small>Total Pemasukan</small>
+            <strong style="color: #00ff88;">Rp {total_income:,.0f}</strong>
+        </div>
+        <div class="stat">
+            <small>Total Pengeluaran</small>
+            <strong style="color: #ff4f4f;">Rp {total_expense:,.0f}</strong>
+        </div>
+        <div class="stat">
+            <small>Saldo Bersih</small>
+            <strong style="color: var(--cyan);">Rp {(total_income - total_expense):,.0f}</strong>
         </div>
     </div>
 
-    <!-- KOTAK GRAFIK GAYA SAHAM/CRYPTO -->
-    <div class="panel">
+    <!-- KOTAK GRAFIK GAYA SAHAM/CRYPTO (TETAP BARU) -->
+    <div class="panel" style="margin-top: 20px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
-            <h2 style="margin:0;">Grafik Keuangan</h2>
+            <h2 style="margin:0;">Grafik Saldo</h2>
             <span style="color:var(--cyan); font-size:12px; border:1px solid var(--cyan); padding:4px 8px; border-radius:20px;">1D</span>
         </div>
         <div style="width: 100%; height: 250px;">
@@ -478,8 +473,8 @@ def dashboard():
         
         // Membuat efek gradasi warna hijau transparan di bawah garis
         let gradient = ctxChart.createLinearGradient(0, 0, 0, 250);
-        gradient.addColorStop(0, 'rgba(0, 255, 136, 0.4)'); // Hijau transparan di atas
-        gradient.addColorStop(1, 'rgba(0, 255, 136, 0.0)'); // Hilang di bawah
+        gradient.addColorStop(0, 'rgba(0, 255, 136, 0.4)');
+        gradient.addColorStop(1, 'rgba(0, 255, 136, 0.0)');
 
         new Chart(ctxChart, {{
             type: 'line',
@@ -488,13 +483,13 @@ def dashboard():
                 datasets: [{{
                     label: 'Total Saldo',
                     data: {chart_data_json},
-                    borderColor: '#00ff88', // Warna garis hijau
+                    borderColor: '#00ff88',
                     borderWidth: 3,
                     backgroundColor: gradient,
-                    fill: true, // Mengisi area di bawah garis
-                    tension: 0.4, // Membuat garis melengkung halus (smooth)
-                    pointRadius: 0, // Titik tidak terlihat (seperti di gambar)
-                    pointHoverRadius: 6, // Titik muncul saat di-hover
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 6,
                     pointBackgroundColor: '#00ff88',
                     pointBorderColor: '#fff'
                 }}]
@@ -503,7 +498,7 @@ def dashboard():
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {{
-                    legend: {{ display: false }}, // Hilangkan legend
+                    legend: {{ display: false }},
                     tooltip: {{
                         mode: 'index',
                         intersect: false,
@@ -516,11 +511,11 @@ def dashboard():
                 }},
                 scales: {{
                     x: {{
-                        grid: {{ display: false, drawBorder: false }}, // Hilangkan garis grid vertikal
+                        grid: {{ display: false, drawBorder: false }},
                         ticks: {{ color: '#9aabc5' }}
                     }},
                     y: {{
-                        grid: {{ color: '#243454', borderDash: [5, 5], drawBorder: false }}, // Garis grid horizontal putus-putus
+                        grid: {{ color: '#243454', borderDash: [5, 5], drawBorder: false }},
                         ticks: {{ color: '#9aabc5' }}
                     }}
                 }},
@@ -597,6 +592,7 @@ def evaluation_page():
     body = """<div class="panel"><h2>Evaluasi Otomatis</h2><p class="muted">Sistem telah memberikan evaluasi otomatis ke dalam catatan Anda di halaman Keuangan dan Trading.</p></div>"""
     return page("Evaluasi", body)
 
+# --- PERBAIKAN: ROUTE PROFIL DENGAN FITUR UPLOAD FOTO ---
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
@@ -604,11 +600,37 @@ def profile():
     if request.method == "POST":
         display = request.form.get("display_name")
         bio = request.form.get("bio")
-        db().execute("UPDATE users SET display_name=?, bio=? WHERE id=?", (display, bio, user["id"]))
-        db().commit(); flash("Profil diperbarui!"); return redirect(url_for("profile"))
+        photo = user["photo"] # Default ke foto lama
         
-    body = f"""<div class="panel" style="max-width:400px; margin: 0 auto;"><h2>Profil Pengguna</h2>
-    <form method="post">
+        # Logika Upload Foto
+        file = request.files.get("photo")
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            # Buat nama unik agar tidak bentrok
+            filename = f"user_{user['id']}_{int(datetime.now().timestamp())}_{filename}"
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            file.save(filepath)
+            photo = filename
+            
+        db().execute("UPDATE users SET display_name=?, bio=?, photo=? WHERE id=?", (display, bio, photo, user["id"]))
+        db().commit()
+        flash("Profil berhasil diperbarui!")
+        return redirect(url_for("profile"))
+        
+    photo_url = url_for('uploaded_file', filename=user['photo']) if user['photo'] else 'https://ui-avatars.com/api/?name=' + user['display_name'] + '&background=42e8ff&color=000'
+        
+    body = f"""<div class="panel" style="max-width:400px; margin: 0 auto;">
+    <h2>Profil Pengguna</h2>
+    <form method="post" enctype="multipart/form-data">
+        
+        <!-- Tampilan Avatar Saat Ini -->
+        <div style="text-align:center; margin-bottom: 15px;">
+            <img src="{photo_url}" class="avatar" style="width: 100px; height: 100px;">
+        </div>
+
+        <label>Ganti Foto Profil (Opsional)</label>
+        <input type="file" name="photo" accept="image/png, image/jpeg, image/webp">
+        
         <label>Nama Tampilan</label><input name="display_name" value="{user['display_name']}">
         <label>Bio</label><textarea name="bio">{user['bio'] or ''}</textarea>
         <button>Simpan Perubahan</button>
