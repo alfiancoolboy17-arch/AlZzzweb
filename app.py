@@ -207,13 +207,15 @@ main {
     box-sizing: border-box;
 }
 
-/* 4. Panel / Tabel 100% PEKAT (Solid) */
+/* 4. Panel / Tabel 100% PEKAT (Solid) & RATA TENGAH */
 .panel, .stat {
     background: #11182b; 
     border: 2px solid var(--line);
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 16px;
+    margin-left: auto;  /* Memaksa Rata Kiri */
+    margin-right: auto; /* Memaksa Rata Kanan */
     position: relative;
     z-index: 20;
     animation: neon-glow 4s linear infinite;
@@ -267,15 +269,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     background: var(--pink); color: white; border: none; padding: 5px 10px; 
     border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; 
     box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;
-}
-
-/* CSS SAKTI UNTUK MENENGAHKAN LOGIN */
-.login-wrapper {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 75vh;
-    width: 100%;
 }
 </style></head><body>
 
@@ -414,12 +407,12 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
             player.pauseVideo();
             isPlaying = false;
             localStorage.setItem('musicPlaying', 'false');
-            document.getElementById("playBtn").innerHTML = "🎵 Play DJ";
+            document.getElementById('playBtn').innerHTML = "🎵 Play DJ";
         } else {
             player.playVideo();
             isPlaying = true;
             localStorage.setItem('musicPlaying', 'true');
-            document.getElementById("playBtn").innerHTML = "⏸️ Pause DJ";
+            document.getElementById('playBtn').innerHTML = "⏸️ Pause DJ";
         }
     }
 
@@ -464,11 +457,11 @@ def setup():
             flash("Admin berhasil dibuat. Silakan login.")
             return redirect(url_for("login"))
     
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:320px; width:100%; margin:0;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
+    body = """<div class="panel" style="max-width:320px; width:100%;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
     <form method="post"><label>Username admin</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name">
     <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
-    <button>Buat admin</button></form></div></div>"""
+    <button>Buat admin</button></form></div>"""
     return page("Setup", body)
 
 @app.route("/login", methods=["GET", "POST"])
@@ -479,16 +472,16 @@ def login():
         if user and check_password_hash(user["password_hash"], request.form.get("password", "")):
             session.clear()
             session["user_id"] = user["id"]
+            session["just_logged_in"] = True # TANDA BARU SAJA LOGIN
             return redirect(url_for("dashboard"))
         flash("Username atau kata sandi tidak cocok.")
     
-    # UKURAN DIKECILKAN (max-width: 280px)
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:280px; width:100%; margin:0;"><h1 style="text-align:center;">LOGIN</h1>
+    body = """<div class="panel" style="max-width:280px; width:100%;"><h1 style="text-align:center;">LOGIN</h1>
     <form method="post"><label>Username</label><input name="username" required>
     <label>Kata sandi</label><input type="password" name="password" required>
     <button>Masuk</button></form>
     <p style="text-align:center; margin-top:15px; font-size:12px;">Belum punya akun? <a href="{{url_for('register')}}" style="color:var(--cyan); text-decoration:none;">Daftar di sini</a></p>
-    </div></div>"""
+    </div>"""
     return page("Login", body)
 
 @app.route("/register", methods=["GET", "POST"])
@@ -512,8 +505,7 @@ def register():
             except sqlite3.IntegrityError:
                 flash("Username sudah digunakan. Silakan pilih yang lain.")
                 
-    # UKURAN DIKECILKAN (max-width: 300px)
-    body = """<div class="login-wrapper"><div class="panel" style="max-width:300px; width:100%; margin:0;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    body = """<div class="panel" style="max-width:300px; width:100%;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
     <p class="muted" style="text-align:center; font-size:12px;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
         <label>Username</label><input name="username" required minlength="3">
@@ -522,7 +514,7 @@ def register():
         <button>Daftar Sekarang</button>
     </form>
     <p style="text-align:center; margin-top:15px; font-size:12px;">Sudah punya akun? <a href="{{url_for('login')}}" style="color:var(--cyan); text-decoration:none;">Login di sini</a></p>
-    </div></div>"""
+    </div>"""
     return page("Daftar", body)
 
 @app.route("/logout")
@@ -540,31 +532,95 @@ def dashboard():
         WHERE user_id=? AND entry_date LIKE ? GROUP BY kind""", args).fetchall()
     income = next((r["total"] for r in totals if r["kind"] == "Pemasukan"), 0)
     expense = next((r["total"] for r in totals if r["kind"] == "Pengeluaran"), 0)
-    recent = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 8",(user["id"],)).fetchall()
     
+    # MENGAMBIL DATA UNTUK GRAFIK TRADING (Riwayat Saldo)
+    recent = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date ASC,id ASC LIMIT 15",(user["id"],)).fetchall()
+    chart_labels = []
+    chart_data = []
+    balance = 0
+    for t in recent:
+        chart_labels.append(t['entry_date'][5:]) # Ambil bulan-tanggal saja
+        if t['kind'] == 'Pemasukan':
+            balance += t['amount']
+        else:
+            balance -= t['amount']
+        chart_data.append(balance)
+
+    play_welcome = session.pop('just_logged_in', False) # Cek dan hapus tanda login
+
     body = """<h1>Dashboard</h1><p class="muted">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
     <div class="grid"><div class="stat"><small>Total pemasukan</small><strong>Rp {{'{:,.0f}'.format(income)}}</strong></div>
     <div class="stat"><small>Total pengeluaran</small><strong>Rp {{'{:,.0f}'.format(expense)}}</strong></div>
     <div class="stat"><small>Selisih</small><strong>Rp {{'{:,.0f}'.format(income-expense)}}</strong></div></div>
+    
+    <div class="panel"><h2>Tren Saldo Keuanganmu</h2>
+    <div style="height: 250px; width: 100%;">
+        <canvas id="tradingChart"></canvas>
+    </div></div>
+
     <div class="panel"><h2>Transaksi terbaru</h2>{% if recent %}<table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th></tr>
-    {% for x in recent %}<tr><td>{{x.entry_date}}</td><td>{{x.kind}}</td><td>{{x.category}}</td><td>Rp {{'{:,.0f}'.format(x.amount)}}</td></tr>{% endfor %}</table>{% else %}<p class="muted">Belum ada transaksi.</p>{% endif %}</div>
-    <div class="panel"><h2>Grafik bulan ini</h2><canvas id="chart" height="110"></canvas></div>
+    {% for x in recent|reverse %}<tr><td>{{x.entry_date}}</td><td>{{x.kind}}</td><td>{{x.category}}</td><td>Rp {{'{:,.0f}'.format(x.amount)}}</td></tr>{% endfor %}</table>{% else %}<p class="muted">Belum ada transaksi.</p>{% endif %}</div>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-    new Chart(document.getElementById('chart'),{type:'bar',data:{labels:['Pemasukan','Pengeluaran'],datasets:[{label:'Rupiah',data:[{{income}},{{expense}}]}]},options:{responsive:true,plugins:{legend:{display:false}}}});
+    // GRAFIK TRADING KEREN (LINE CHART)
+    const ctx = document.getElementById('tradingChart').getContext('2d');
     
-    window.onload = function() {
-        if ('speechSynthesis' in window) {
-            var namaUser = "{{ user.display_name|safe }}";
-            var pesan = "Selamat datang bos " + namaUser + ", semoga rezekimu lancar dan berkah hari ini";
-            var speech = new SpeechSynthesisUtterance(pesan);
-            speech.lang = 'id-ID'; speech.rate = 0.9; speech.pitch = 1; 
-            setTimeout(function() { window.speechSynthesis.speak(speech); }, 500);
+    // Membuat efek gradien di bawah garis
+    let gradient = ctx.createLinearGradient(0, 0, 0, 250);
+    gradient.addColorStop(0, 'rgba(66, 232, 255, 0.5)');
+    gradient.addColorStop(1, 'rgba(66, 232, 255, 0)');
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels|safe if chart_labels else '[]' }},
+            datasets: [{
+                label: 'Saldo (Rp)',
+                data: {{ chart_data|safe if chart_data else '[]' }},
+                borderColor: '#42e8ff', // Warna Cyan
+                backgroundColor: gradient,
+                borderWidth: 3,
+                pointBackgroundColor: '#ff4fd8', // Titik Pink
+                pointBorderColor: '#fff',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                fill: true,
+                tension: 0.4 // Membuat garis melengkung mulus
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { 
+                    grid: { display: false, color: '#243454' },
+                    ticks: { color: '#9aabc5' }
+                },
+                y: { 
+                    grid: { color: '#243454', borderDash: [5, 5] },
+                    ticks: { color: '#9aabc5' }
+                }
+            }
         }
-    };
+    });
+
+    // SUARA SAMBUTAN (Hanya jalan kalau baru login)
+    {% if play_welcome %}
+    if ('speechSynthesis' in window) {
+        var namaUser = "{{ user.display_name|safe }}";
+        var pesan = "Selamat datang bos " + namaUser + ", semoga rezekimu lancar dan berkah hari ini";
+        var speech = new SpeechSynthesisUtterance(pesan);
+        speech.lang = 'id-ID'; speech.rate = 0.9; speech.pitch = 1; 
+        setTimeout(function() { window.speechSynthesis.speak(speech); }, 500);
+    }
+    {% endif %}
     </script>"""
-    return page("Dashboard", body, user=user, month=month, income=income, expense=expense, recent=recent)
+    return page("Dashboard", body, user=user, month=month, income=income, expense=expense, recent=recent,
+                chart_labels=str(chart_labels).replace("'", '"'), chart_data=str(chart_data))
 
 @app.route("/transactions", methods=["GET", "POST"])
 @app.route("/transactions/edit/<int:id>", methods=["GET", "POST"])
@@ -611,7 +667,7 @@ def transactions(id=None):
     val_desc = edit_data['description'] if edit_data else ''
     form_action = url_for('transactions', id=id) if id else url_for('transactions')
 
-    body = """<div class="panel"><h1>{{form_title}}</h1><form method="post" action="{{form_action}}"><div class="row">
+    body = """<div class="panel" style="margin-bottom:16px;"><h1>{{form_title}}</h1><form method="post" action="{{form_action}}"><div class="row">
     <div><label>Jenis</label><select name="kind">
         <option {% if val_kind=="Pemasukan" %}selected{% endif %}>Pemasukan</option>
         <option {% if val_kind=="Pengeluaran" %}selected{% endif %}>Pengeluaran</option>
@@ -649,7 +705,7 @@ def journal_page():
             return redirect(url_for("journal_page"))
         flash("Nama aset/instrumen wajib diisi.")
     rows = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
-    body = """<div class="panel"><h1>Jurnal trading</h1><p class="muted">Gunakan untuk mencatat rencana dan evaluasi.</p>
+    body = """<div class="panel" style="margin-bottom:16px;"><h1>Jurnal trading</h1><p class="muted">Gunakan untuk mencatat rencana dan evaluasi.</p>
     <form method="post"><label>Aset / instrumen</label><input name="symbol" required>
     <label>Rencana</label><textarea name="plan"></textarea><label>Hasil</label><input name="result">
     <label>Catatan</label><textarea name="notes"></textarea><label>Tanggal</label><input type="date" name="entry_date" value="{{today}}">
@@ -664,7 +720,7 @@ def evaluation_page():
     journals = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY entry_date DESC,id DESC",(user["id"],)).fetchall()
     transactions = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 20",(user["id"],)).fetchall()
     
-    body = """<div class="panel"><h1>Evaluasi Jurnal Trading</h1><p class="muted">Sistem menganalisis cara tradingmu.</p>"""
+    body = """<div class="panel" style="margin-bottom:16px;"><h1>Evaluasi Jurnal Trading</h1><p class="muted">Sistem menganalisis cara tradingmu.</p>"""
     if not journals:
         body += "<p>Belum ada data trading.</p></div>"
     else:
@@ -725,24 +781,22 @@ def profile():
         return redirect(url_for("profile"))
         
     body = """
-    <div style="display: flex; justify-content: center; width: 100%; margin-bottom: 20px;">
-        <div class="panel" style="text-align:center; position:relative; max-width: 400px; width: 100%; margin: 0;">
-            <div class="avatar-container">
-                {% if user.photo %}
-                    <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
-                {% else %}
-                    <div class="avatar" style="background:#243454; display:flex; align-items:center; justify-content:center; margin:0 auto;">👤</div>
-                {% endif %}
-                <a href="#" class="edit-icon" onclick="document.getElementById('photoForm').style.display='block';">✏️</a>
-            </div>
-            
-            <h1 style="margin-top:10px;">{{user.display_name}} <a href="#" style="font-size:14px;text-decoration:none;" onclick="document.getElementById('credForm').style.display='block';">✏️</a></h1>
-            <p class="muted" style="margin-bottom:15px;">@{{user.username}}</p>
-            
-            <div style="background:#0a1020;padding:15px;border-radius:10px;border:1px solid #344665;text-align:left;">
-                <b>Bio:</b> <span class="muted">{{user.bio if user.bio else 'Belum ada bio.'}}</span> 
-                <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
-            </div>
+    <div class="panel" style="text-align:center; position:relative; max-width: 400px; width: 100%; margin: 20px auto 16px auto;">
+        <div class="avatar-container">
+            {% if user.photo %}
+                <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
+            {% else %}
+                <div class="avatar" style="background:#243454; display:flex; align-items:center; justify-content:center; margin:0 auto;">👤</div>
+            {% endif %}
+            <a href="#" class="edit-icon" onclick="document.getElementById('photoForm').style.display='block';">✏️</a>
+        </div>
+        
+        <h1 style="margin-top:10px;">{{user.display_name}} <a href="#" style="font-size:14px;text-decoration:none;" onclick="document.getElementById('credForm').style.display='block';">✏️</a></h1>
+        <p class="muted" style="margin-bottom:15px;">@{{user.username}}</p>
+        
+        <div style="background:#0a1020;padding:15px;border-radius:10px;border:1px solid #344665;text-align:left;">
+            <b>Bio:</b> <span class="muted">{{user.bio if user.bio else 'Belum ada bio.'}}</span> 
+            <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
         </div>
     </div>
 
@@ -811,7 +865,7 @@ def admin_page(id=None):
                 flash("Username sudah digunakan.")
                 
     users = db().execute("SELECT id,username,display_name,role FROM users ORDER BY id").fetchall()
-    body = """<div class="panel"><h1>Admin Panel</h1><form method="post"><label>Username anggota</label><input name="username" required minlength="3">
+    body = """<div class="panel" style="margin-bottom:16px;"><h1>Admin Panel</h1><form method="post"><label>Username anggota</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name"><label>Sandi (minimal 12 karakter)</label><input name="password" type="password" required minlength="12">
     <button>Buat akun anggota</button></form></div>
     
