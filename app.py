@@ -67,7 +67,7 @@ def init_db():
     try:
         conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
     except sqlite3.OperationalError:
-        pass # Abaikan jika kolom bio sudah ada
+        pass 
     # ----------------------------------------------------------------------
 
     conn.commit()
