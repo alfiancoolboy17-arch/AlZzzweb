@@ -170,15 +170,15 @@ TEMPLATE = r"""
 <title>{{ title }} • AlZzz Web</title>
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif}
-header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif; position: relative; z-index: 0;}
+header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative; z-index: 10; background: #080b18cc; backdrop-filter: blur(5px);}
 .header-left { display: flex; align-items: center; gap: 10px; }
 .logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
 .hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
 .menu-dropdown{display:none;position:absolute;top:60px;right:5%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:100;box-shadow:0 10px 30px #0008;min-width:200px}
 .menu-dropdown a{display:block;padding:10px;color:var(--text);text-decoration:none;border-radius:8px}
 .menu-dropdown a:hover{background:#243454;color:var(--cyan)}
-main{max-width:1050px;margin:28px auto;padding:0 16px}
+main{max-width:1050px;margin:28px auto;padding:0 16px; position: relative; z-index: 10;}
 h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
 input,select,textarea,button{font:inherit;border-radius:9px;padding:11px;width:100%;margin:6px 0;background:#0a1020;color:var(--text);border:1px solid #344665}
@@ -191,7 +191,7 @@ table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{te
 .edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:25px;height:25px;display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;cursor:pointer;text-decoration:none}
 .edit-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;width:auto;margin:0}
 .btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
-footer{text-align:center;color:var(--muted);padding:30px}
+footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-index: 10;}
 
 .panel, .stat {
     background: #11182bee;
@@ -200,6 +200,7 @@ footer{text-align:center;color:var(--muted);padding:30px}
     padding: 18px;
     margin-bottom: 16px;
     animation: neon-glow 4s linear infinite;
+    backdrop-filter: blur(10px); 
 }
 @keyframes neon-glow {
     0%, 100% { box-shadow: 0 0 10px #42e8ff, inset 0 0 5px #42e8ff; border-color: #42e8ff; }
@@ -208,19 +209,27 @@ footer{text-align:center;color:var(--muted);padding:30px}
     75% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; border-color: #ffeb3b; }
 }
 
-/* TOMBOL MUSIK DI HEADER */
 .music-btn {
     background: var(--pink); color: white; border: none; padding: 5px 10px; 
     border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; 
     box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;
 }
-.music-btn:hover { filter: brightness(1.2); }
+
+#bg-graph {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: -1;
+    opacity: 0.15;
+    pointer-events: none;
+}
 </style></head><body>
+
+<canvas id="bg-graph"></canvas>
+
 <header>
   <div class="header-left">
       <div class="logo">👑 ALZZZ WEB</div>
       {% if user %}
-      <!-- Tombol DJ Pindah ke Kiri Atas -->
       <button class="music-btn" onclick="togglePlay()" id="playBtn">🎵 Play DJ</button>
       {% endif %}
   </div>
@@ -244,47 +253,97 @@ footer{text-align:center;color:var(--muted);padding:30px}
 <footer>AlZzz Web • Catat dan evaluasi keuangan dengan bijak</footer>
 
 {% if user %}
-<!-- YOUTUBE IFRAME API (Tersembunyi) -->
 <div id="yt-player" style="display:none;"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
+    // --- GRAFIK BERGERAK ---
+    const canvas = document.getElementById('bg-graph');
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    let points = [];
+    function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+        points = [];
+        for(let i=0; i<width; i+=20) {
+            points.push({x: i, y: height/2 + (Math.random() - 0.5) * 100});
+        }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    let offset = 0;
+    function draw() {
+        ctx.clearRect(0, 0, width, height);
+        ctx.beginPath(); ctx.strokeStyle = '#42e8ff'; ctx.lineWidth = 2;
+        offset += 1; 
+        for(let i=0; i<points.length; i++) {
+            let y = height/2 + Math.sin((i + offset*0.05)*0.02) * 150 + Math.cos((i + offset*0.02)*0.05) * 50;
+            if(i === 0) ctx.moveTo(points[i].x, y); else ctx.lineTo(points[i].x, y);
+        }
+        ctx.stroke();
+        ctx.beginPath(); ctx.strokeStyle = '#ff4fd8';
+        for(let i=0; i<points.length; i++) {
+            let y = height/2 + Math.cos((i + offset*0.03)*0.03) * 120 + Math.sin((i + offset*0.01)*0.04) * 60;
+            if(i === 0) ctx.moveTo(points[i].x, y); else ctx.lineTo(points[i].x, y);
+        }
+        ctx.stroke();
+        requestAnimationFrame(draw);
+    }
+    draw();
+
+    // --- SCRIPT MUSIK YOUTUBE (PERSISTEN) ---
     var player;
-    var isPlaying = false;
+    var isPlaying = localStorage.getItem('musicPlaying') === 'true';
+    var btn;
 
     function onYouTubeIframeAPIReady() {
+        btn = document.getElementById("playBtn");
+        if(btn) btn.innerHTML = isPlaying ? "⏸️ Pause DJ" : "🎵 Play DJ";
+
         player = new YT.Player('yt-player', {
-            height: '0',
-            width: '0',
-            videoId: 'sQn6XwEG13Q', // ID Lagu DJ Tuang Lagi Anggurnya
-            playerVars: {
-                'autoplay': 0,
-                'loop': 1,
-                'playlist': 'sQn6XwEG13Q'
-            },
+            height: '0', width: '0',
+            videoId: 'sQn6XwEG13Q', 
+            playerVars: { 'autoplay': 0, 'loop': 1, 'playlist': 'sQn6XwEG13Q' },
             events: {
-                'onReady': onPlayerReady
+                'onReady': (event) => {
+                    if (isPlaying) {
+                        let time = parseFloat(localStorage.getItem('musicTime') || '0');
+                        event.target.seekTo(time);
+                        event.target.playVideo();
+                    }
+                }
             }
         });
     }
 
-    function onPlayerReady(event) {
-        // Video siap diputar
-    }
-
     function togglePlay() {
-        var btn = document.getElementById("playBtn");
-        if (player && typeof player.playVideo === 'function') {
-            if (isPlaying) {
-                player.pauseVideo();
-                btn.innerHTML = "🎵 Play DJ";
-                isPlaying = false;
-            } else {
-                player.playVideo();
-                btn.innerHTML = "⏸️ Pause DJ";
-                isPlaying = true;
-            }
+        if (!player) return;
+        if (isPlaying) {
+            player.pauseVideo();
+            isPlaying = false;
+            localStorage.setItem('musicPlaying', 'false');
+            document.getElementById("playBtn").innerHTML = "🎵 Play DJ";
+        } else {
+            player.playVideo();
+            isPlaying = true;
+            localStorage.setItem('musicPlaying', 'true');
+            document.getElementById("playBtn").innerHTML = "⏸️ Pause DJ";
         }
     }
+
+    // TRIK PAMUNGKAS: Jika musik ingin nyala tapi diblokir browser saat pindah halaman,
+    // musik akan otomatis nyala saat layar disentuh (di-klik) di mana saja.
+    document.body.addEventListener('click', function() {
+        if (isPlaying && player && player.getPlayerState && player.getPlayerState() !== 1) {
+            player.playVideo();
+        }
+    });
+
+    setInterval(() => {
+        if (isPlaying && player && player.getCurrentTime) {
+            localStorage.setItem('musicTime', player.getCurrentTime());
+        }
+    }, 1000);
 </script>
 {% endif %}
 
