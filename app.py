@@ -147,7 +147,6 @@ def auto_evaluate_trading(plan, result, notes):
         
     return f"{verdict} " + " ".join(feedback)
 
-# --- FUNGSI EVALUASI KEUANGAN BARU ---
 def auto_evaluate_finance(kind, category, amount, description):
     amount = float(amount)
     if kind == "Pengeluaran":
@@ -164,7 +163,6 @@ def auto_evaluate_finance(kind, category, amount, description):
             return "💰 Pemasukan besar! Segera alokasikan ke tabungan atau investasi sebelum habis untuk hal konsumtif."
         else:
             return "📈 Pemasukan bagus. Sisihkan minimal 10% untuk tabungan."
-# --------------------------------------
 
 TEMPLATE = r"""
 <!doctype html><html lang="id"><head><meta charset="utf-8">
@@ -174,6 +172,7 @@ TEMPLATE = r"""
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#142444 0,#080b18 48%);color:var(--text);font:15px Arial,sans-serif}
 header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;position:relative}
+.header-left { display: flex; align-items: center; gap: 10px; }
 .logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
 .hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
 .menu-dropdown{display:none;position:absolute;top:60px;right:5%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:100;box-shadow:0 10px 30px #0008;min-width:200px}
@@ -209,29 +208,23 @@ footer{text-align:center;color:var(--muted);padding:30px}
     75% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; border-color: #ffeb3b; }
 }
 
-/* CSS untuk Pemutar Musik Melayang */
-.music-player {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #11182bee;
-    border: 2px solid var(--pink);
-    border-radius: 50px;
-    padding: 10px;
-    box-shadow: 0 0 15px var(--pink);
-    z-index: 999;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+/* TOMBOL MUSIK DI HEADER */
+.music-btn {
+    background: var(--pink); color: white; border: none; padding: 5px 10px; 
+    border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; 
+    box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;
 }
-.music-player p { margin: 0; font-size: 12px; color: var(--text); }
-.music-player button {
-    margin: 0; padding: 5px 15px; border-radius: 20px; font-size: 14px; width: auto;
-    background: var(--pink); color: white; border: none;
-}
+.music-btn:hover { filter: brightness(1.2); }
 </style></head><body>
 <header>
-  <div class="logo">⚡ ALZZZ WEB</div>
+  <div class="header-left">
+      <div class="logo">👑 ALZZZ WEB</div>
+      {% if user %}
+      <!-- Tombol DJ Pindah ke Kiri Atas -->
+      <button class="music-btn" onclick="togglePlay()" id="playBtn">🎵 Play DJ</button>
+      {% endif %}
+  </div>
+  
   {% if user %}
   <div class="hamburger" onclick="var m = document.getElementById('myMenu'); m.style.display = (m.style.display === 'block') ? 'none' : 'block';">☰</div>
   <div id="myMenu" class="menu-dropdown">
@@ -251,25 +244,45 @@ footer{text-align:center;color:var(--muted);padding:30px}
 <footer>AlZzz Web • Catat dan evaluasi keuangan dengan bijak</footer>
 
 {% if user %}
-<!-- FITUR MUSIK DJ -->
-<audio id="djAudio" loop>
-  <!-- GANTI LINK MP3 DI BAWAH INI DENGAN LINK LAGU DJ KAMU -->
-  <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
-</audio>
-<div class="music-player">
-    <p>🎵 DJ Tuang Lagi</p>
-    <button onclick="togglePlay()" id="playBtn">Play</button>
-</div>
+<!-- YOUTUBE IFRAME API (Tersembunyi) -->
+<div id="yt-player" style="display:none;"></div>
+<script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    var audio = document.getElementById("djAudio");
-    var btn = document.getElementById("playBtn");
+    var player;
+    var isPlaying = false;
+
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('yt-player', {
+            height: '0',
+            width: '0',
+            videoId: 'sQn6XwEG13Q', // ID Lagu DJ Tuang Lagi Anggurnya
+            playerVars: {
+                'autoplay': 0,
+                'loop': 1,
+                'playlist': 'sQn6XwEG13Q'
+            },
+            events: {
+                'onReady': onPlayerReady
+            }
+        });
+    }
+
+    function onPlayerReady(event) {
+        // Video siap diputar
+    }
+
     function togglePlay() {
-        if (audio.paused) {
-            audio.play();
-            btn.innerHTML = "Pause";
-        } else {
-            audio.pause();
-            btn.innerHTML = "Play";
+        var btn = document.getElementById("playBtn");
+        if (player && typeof player.playVideo === 'function') {
+            if (isPlaying) {
+                player.pauseVideo();
+                btn.innerHTML = "🎵 Play DJ";
+                isPlaying = false;
+            } else {
+                player.playVideo();
+                btn.innerHTML = "⏸️ Pause DJ";
+                isPlaying = true;
+            }
         }
     }
 </script>
@@ -491,7 +504,6 @@ def journal_page():
     {% for x in rows %}<div style="border-bottom:1px solid #243454;padding:10px 0"><b>{{x.entry_date}} • {{x.symbol}}</b><p>{{x.plan}}</p><p>{{x.result}}</p><p class="muted">{{x.notes}}</p></div>{% else %}<p class="muted">Belum ada catatan jurnal.</p>{% endfor %}</div>"""
     return page("Jurnal", body, rows=rows, today=date.today().isoformat())
 
-# --- HALAMAN EVALUASI (DIPERBARUI) ---
 @app.route("/evaluation")
 @login_required
 def evaluation_page():
@@ -520,7 +532,6 @@ def evaluation_page():
         body += "</table></div>"
     
     return page("Evaluasi", body)
-# ------------------------------------
 
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
