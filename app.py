@@ -7,14 +7,24 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "alzzz.db"))
+
+# --- PENGATURAN OTOMATIS DATABASE (Aman untuk Netrun dan Termux) ---
+if os.environ.get("DATABASE_PATH"):
+    DB_PATH = os.environ.get("DATABASE_PATH")
+elif os.path.exists("/data"):
+    DB_PATH = "/data/alzzz.db" # Otomatis dipakai jika di Netrun
+else:
+    DB_PATH = os.path.join(BASE_DIR, "alzzz.db") # Dipakai di Termux lokal
+# -------------------------------------------------------------------
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "static_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("ALZZZ_SECRET")
-if not app.secret_key:
-    raise RuntimeError("ALZZZ_SECRET belum diatur.")
+
+# --- KUNCI RAHASIA OTOMATIS (Tidak akan error lagi) ---
+app.secret_key = os.environ.get("ALZZZ_SECRET", "Admin1701")
+# ------------------------------------------------------
 
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
