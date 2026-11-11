@@ -171,57 +171,75 @@ TEMPLATE = r"""
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
 
-/* PERBAIKAN BACKGROUND & LAYER */
-html {
+/* PERBAIKAN TOTAL LAYOUT & LAYER */
+html, body {
+    margin: 0; padding: 0; width: 100%; min-height: 100vh;
     background: radial-gradient(circle at top,#142444 0,#080b18 48%);
-    height: 100%;
-}
-body {
-    margin: 0;
-    background: transparent; /* Dibuat transparan agar canvas terlihat */
     color: var(--text);
     font: 15px Arial,sans-serif;
     overflow-x: hidden;
 }
 
-/* LAYER KONTEN DI ATAS CANVAS */
-header, main, footer {
-    position: relative;
-    z-index: 10; 
+/* 1. Canvas di paling belakang */
+#bg-graph {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 1; /* Paling bawah */
+    pointer-events: none;
 }
 
-/* PANEL & TABEL 100% SOLID (PEKAT) */
+/* 2. Header & Main di atas Canvas */
+header {
+    position: relative;
+    z-index: 50; /* Di atas canvas, di bawah dropdown */
+    padding: 15px 5%;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    background: #080b18; /* Solid background untuk header */
+}
+
+/* 3. Main content (Membuat semua isi ke tengah) */
+main {
+    position: relative;
+    z-index: 10; /* Di atas canvas */
+    max-width: 1050px;
+    margin: 28px auto;
+    padding: 0 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Kunci agar kotak login ke tengah */
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 4. Panel / Tabel 100% PEKAT (Solid) */
 .panel, .stat {
-    background: #11182b; /* Warna solid, tidak tembus pandang */
+    background: #11182b; /* Warna solid, tidak ada transparansi */
     border: 2px solid var(--line);
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 16px;
+    width: 100%; /* Agar penuh di dalam main */
+    box-sizing: border-box;
+    position: relative;
+    z-index: 20;
     animation: neon-glow 4s linear infinite;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.8); /* Bayangan tebal agar terpisah dari background */
+    box-shadow: 0 4px 15px rgba(0,0,0,0.8);
 }
 
-header{padding:15px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center; background: #080b18cc; backdrop-filter: blur(5px);}
-.header-left { display: flex; align-items: center; gap: 10px; }
-.logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
-.hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
-.menu-dropdown{display:none;position:absolute;top:60px;right:5%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;z-index:100;box-shadow:0 10px 30px #0008;min-width:200px}
-.menu-dropdown a{display:block;padding:10px;color:var(--text);text-decoration:none;border-radius:8px}
-.menu-dropdown a:hover{background:#243454;color:var(--cyan)}
-main{max-width:1050px;margin:28px auto;padding:0 16px;}
-h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
-input,select,textarea,button{font:inherit;border-radius:9px;padding:11px;width:100%;margin:6px 0;background:#0a1020;color:var(--text);border:1px solid #344665}
-textarea{min-height:85px}button{background:linear-gradient(90deg,#087e9a,#673b91);border:0;font-weight:bold;cursor:pointer}button:hover{filter:brightness(1.2)}
-label{display:block;color:var(--muted);margin-top:8px}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--cyan)}
-.msg{padding:10px;background:#17334a;border-radius:8px;margin-bottom:12px}.muted{color:var(--muted)}
-.avatar-container{position:relative;display:inline-block}
-.avatar{width:80px;height:80px;object-fit:cover;border-radius:50%;border:2px solid var(--cyan)}
-.edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:25px;height:25px;display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;cursor:pointer;text-decoration:none}
-.edit-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;width:auto;margin:0}
-.btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
-footer{text-align:center;color:var(--muted);padding:30px;}
+/* 5. Menu Dropdown 100% PEKAT */
+.menu-dropdown {
+    display: none;
+    position: absolute;
+    top: 60px; right: 5%;
+    background: #11182b; /* Solid background */
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    z-index: 999; /* Paling tinggi agar menutupi segalanya */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.9);
+    min-width: 200px;
+}
 
 @keyframes neon-glow {
     0%, 100% { box-shadow: 0 0 10px #42e8ff, inset 0 0 5px #42e8ff; border-color: #42e8ff; }
@@ -230,18 +248,31 @@ footer{text-align:center;color:var(--muted);padding:30px;}
     75% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; border-color: #ffeb3b; }
 }
 
+.header-left { display: flex; align-items: center; gap: 10px; }
+.logo{font-weight:800;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 12px #42e8ff66}
+.hamburger{cursor:pointer;font-size:24px;color:var(--cyan);user-select:none}
+.menu-dropdown a{display:block;padding:10px;color:var(--text);text-decoration:none;border-radius:8px}
+.menu-dropdown a:hover{background:#243454;color:var(--cyan)}
+
+h1,h2{margin-top:0}h1{font-size:25px}h2{font-size:19px;color:var(--cyan)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px; width: 100%;} 
+.stat small{color:var(--muted)}.stat strong{display:block;font-size:23px;margin-top:8px}
+input,select,textarea,button{font:inherit;border-radius:9px;padding:11px;width:100%;margin:6px 0;background:#0a1020;color:var(--text);border:1px solid #344665}
+textarea{min-height:85px}button{background:linear-gradient(90deg,#087e9a,#673b91);border:0;font-weight:bold;cursor:pointer}button:hover{filter:brightness(1.2)}
+label{display:block;color:var(--muted);margin-top:8px}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--cyan)}
+.msg{padding:10px;background:#17334a;border-radius:8px;margin-bottom:12px; width: 100%; box-sizing: border-box;}.muted{color:var(--muted)}
+.avatar-container{position:relative;display:inline-block}
+.avatar{width:80px;height:80px;object-fit:cover;border-radius:50%;border:2px solid var(--cyan)}
+.edit-icon{position:absolute;bottom:0;right:0;background:var(--cyan);border-radius:50%;width:25px;height:25px;display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;cursor:pointer;text-decoration:none}
+.edit-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px;width:auto;margin:0}
+.btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
+footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-index: 10;}
+
 .music-btn {
     background: var(--pink); color: white; border: none; padding: 5px 10px; 
     border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; 
     box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;
-}
-
-/* CANVAS DIPOSISIKAN DI PALING BELAKANG */
-#bg-graph {
-    position: fixed;
-    top: 0; left: 0; width: 100vw; height: 100vh;
-    z-index: 1; 
-    pointer-events: none;
 }
 </style></head><body>
 
@@ -282,7 +313,6 @@ footer{text-align:center;color:var(--muted);padding:30px;}
     const ctx = canvas.getContext('2d');
     let width, height;
     let time = 0;
-    
     const coins = [];
 
     function resize() {
@@ -292,7 +322,6 @@ footer{text-align:center;color:var(--muted);padding:30px;}
     window.addEventListener('resize', resize);
     resize();
 
-    // Inisialisasi Koin Bitcoin (lebih banyak dan lebih besar)
     for (let i = 0; i < 30; i++) {
         coins.push({
             x: Math.random() * window.innerWidth,
@@ -307,7 +336,6 @@ footer{text-align:center;color:var(--muted);padding:30px;}
         ctx.clearRect(0, 0, width, height);
         time += 0.02; 
 
-        // 1. Gambar Gelombang
         const colors = ['rgba(66, 232, 255,', 'rgba(255, 79, 216,'];
         for(let j=0; j<2; j++) {
             ctx.beginPath();
@@ -338,15 +366,13 @@ footer{text-align:center;color:var(--muted);padding:30px;}
             ctx.fill();
         }
 
-        // 2. Gambar Koin Bitcoin
         coins.forEach(c => {
             ctx.font = "bold " + c.size + "px Arial";
-            ctx.fillStyle = `rgba(247, 147, 26, ${c.opacity})`; // Warna Emas/Bitcoin
+            ctx.fillStyle = `rgba(247, 147, 26, ${c.opacity})`; 
             ctx.textAlign = "center";
             ctx.fillText("₿", c.x, c.y);
 
-            c.y -= c.speed; // Naik ke atas
-            
+            c.y -= c.speed; 
             if (c.y < -50) {
                 c.y = height + 50;
                 c.x = Math.random() * width;
@@ -357,7 +383,7 @@ footer{text-align:center;color:var(--muted);padding:30px;}
     }
     draw();
 
-    // --- SCRIPT MUSIK YOUTUBE (PERSISTEN) ---
+    // --- SCRIPT MUSIK ---
     var player;
     var isPlaying = localStorage.getItem('musicPlaying') === 'true';
 
@@ -436,7 +462,8 @@ def setup():
             db().commit()
             flash("Admin berhasil dibuat. Silakan login.")
             return redirect(url_for("login"))
-    body = """<div class="panel"><h1>Pengaturan awal AlZzz Web</h1><p class="muted">Buat akun admin pertama.</p>
+    # Menambahkan styling max-width agar pas di tengah
+    body = """<div class="panel" style="max-width:400px;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
     <form method="post"><label>Username admin</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name">
     <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
@@ -453,7 +480,8 @@ def login():
             session["user_id"] = user["id"]
             return redirect(url_for("dashboard"))
         flash("Username atau kata sandi tidak cocok.")
-    body = """<div class="panel" style="max-width:350px;margin:auto;padding:15px;"><h1 style="text-align:center;">LOGIN</h1>
+    # Menambahkan styling max-width dan margin agar pas di tengah
+    body = """<div class="panel" style="max-width:350px; margin: 50px auto;"><h1 style="text-align:center;">LOGIN</h1>
     <form method="post"><label>Username</label><input name="username" required>
     <label>Kata sandi</label><input type="password" name="password" required>
     <button>Masuk</button></form>
@@ -482,7 +510,8 @@ def register():
             except sqlite3.IntegrityError:
                 flash("Username sudah digunakan. Silakan pilih yang lain.")
                 
-    body = """<div class="panel" style="max-width:380px;margin:auto;padding:15px;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    # Menambahkan styling max-width dan margin agar pas di tengah
+    body = """<div class="panel" style="max-width:380px; margin: 50px auto;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
     <p class="muted" style="text-align:center;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
         <label>Username</label><input name="username" required minlength="3">
@@ -511,7 +540,7 @@ def dashboard():
     expense = next((r["total"] for r in totals if r["kind"] == "Pengeluaran"), 0)
     recent = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY entry_date DESC,id DESC LIMIT 8",(user["id"],)).fetchall()
     
-    body = """<h1>Dashboard</h1><p class="muted">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
+    body = """<h1 style="width:100%;">Dashboard</h1><p class="muted" style="width:100%;">Halo, {{user.display_name}} • Ringkasan bulan {{month}}</p>
     <div class="grid"><div class="stat"><small>Total pemasukan</small><strong>Rp {{'{:,.0f}'.format(income)}}</strong></div>
     <div class="stat"><small>Total pengeluaran</small><strong>Rp {{'{:,.0f}'.format(expense)}}</strong></div>
     <div class="stat"><small>Selisih</small><strong>Rp {{'{:,.0f}'.format(income-expense)}}</strong></div></div>
@@ -694,7 +723,7 @@ def profile():
         return redirect(url_for("profile"))
         
     body = """
-    <div class="panel" style="text-align:center; position:relative;">
+    <div class="panel" style="text-align:center; position:relative; max-width: 500px;">
         <div class="avatar-container">
             {% if user.photo %}
                 <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
@@ -713,7 +742,7 @@ def profile():
         </div>
     </div>
 
-    <div id="photoForm" class="panel" style="display:none;">
+    <div id="photoForm" class="panel" style="display:none; max-width: 500px;">
         <h2>Ubah Foto Profil</h2>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="action" value="update_photo">
@@ -722,7 +751,7 @@ def profile():
         </form>
     </div>
 
-    <div id="bioForm" class="panel" style="display:none;">
+    <div id="bioForm" class="panel" style="display:none; max-width: 500px;">
         <h2>Ubah Bio</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_bio">
@@ -731,7 +760,7 @@ def profile():
         </form>
     </div>
 
-    <div id="credForm" class="panel" style="display:none;">
+    <div id="credForm" class="panel" style="display:none; max-width: 500px;">
         <h2>Ubah Nama & Sandi</h2>
         <form method="post">
             <input type="hidden" name="action" value="update_credentials">
