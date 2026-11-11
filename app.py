@@ -193,14 +193,17 @@ table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{te
 .btn-danger{background:#ff4f4f;color:white;padding:5px 10px;border-radius:5px;text-decoration:none;font-size:12px;}
 footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-index: 10;}
 
+/* PANEL DIBUAT SOLID AGAR TULISAN TIDAK TEMBUS PANDANG */
 .panel, .stat {
-    background: #11182bee;
+    background: #11182b; /* Warna solid, bukan transparan */
     border: 2px solid var(--line);
     border-radius: 14px;
     padding: 18px;
     margin-bottom: 16px;
     animation: neon-glow 4s linear infinite;
-    backdrop-filter: blur(10px); 
+    position: relative;
+    z-index: 20;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5); /* Tambahan bayangan agar terlihat menonjol */
 }
 @keyframes neon-glow {
     0%, 100% { box-shadow: 0 0 10px #42e8ff, inset 0 0 5px #42e8ff; border-color: #42e8ff; }
@@ -255,11 +258,14 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
 <div id="yt-player" style="display:none;"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    // --- GRAFIK AREA BERGERAK (TRADING STYLE) ---
+    // --- GRAFIK AREA & BITCOIN BERGERAK ---
     const canvas = document.getElementById('bg-graph');
     const ctx = canvas.getContext('2d');
     let width, height;
     let time = 0;
+    
+    // Array untuk Koin Bitcoin
+    const coins = [];
 
     function resize() {
         width = canvas.width = window.innerWidth;
@@ -268,35 +274,42 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
     window.addEventListener('resize', resize);
     resize();
 
+    // Inisialisasi Koin Bitcoin
+    for (let i = 0; i < 20; i++) {
+        coins.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            speed: 1 + Math.random() * 2.5,
+            size: 15 + Math.random() * 25,
+            opacity: 0.1 + Math.random() * 0.4
+        });
+    }
+
     function draw() {
         ctx.clearRect(0, 0, width, height);
-        time += 0.02; // Kecepatan gerak
+        time += 0.02; 
 
-        // Gambar 2 Gelombang (Cyan dan Pink)
+        // 1. Gambar Gelombang (Cyan & Pink)
         const colors = ['rgba(66, 232, 255,', 'rgba(255, 79, 216,'];
-        
         for(let j=0; j<2; j++) {
             ctx.beginPath();
-            ctx.strokeStyle = colors[j] + ' 0.5)'; // Garis agak transparan
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = colors[j] + ' 0.4)'; 
+            ctx.lineWidth = 2;
 
             let points = [];
             for(let x=0; x <= width; x+=10) {
-                // Rumus gelombang kombinasi Sin dan Cos
                 let y = height/2 
                       + Math.sin((x * 0.005) + time + j) * 100 
                       + Math.cos((x * 0.01) + (time * 1.5) + j) * 50;
                 points.push({x: x, y: y});
             }
 
-            // Gambar Garis
             points.forEach((p, i) => {
                 if(i===0) ctx.moveTo(p.x, p.y);
                 else ctx.lineTo(p.x, p.y);
             });
             ctx.stroke();
 
-            // Gambar Area Gradien di bawah garis
             ctx.lineTo(width, height);
             ctx.lineTo(0, height);
             ctx.closePath();
@@ -306,6 +319,23 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
             ctx.fillStyle = gradient;
             ctx.fill();
         }
+
+        // 2. Gambar Koin Bitcoin
+        coins.forEach(c => {
+            ctx.font = "bold " + c.size + "px Arial";
+            ctx.fillStyle = `rgba(247, 147, 26, ${c.opacity})`; // Warna Emas/Bitcoin
+            ctx.textAlign = "center";
+            ctx.fillText("₿", c.x, c.y);
+
+            // Pergerakan koin naik ke atas
+            c.y -= c.speed;
+            
+            // Jika koin keluar layar atas, reset ke bawah
+            if (c.y < -50) {
+                c.y = height + 50;
+                c.x = Math.random() * width;
+            }
+        });
 
         requestAnimationFrame(draw);
     }
