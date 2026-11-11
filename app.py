@@ -197,7 +197,7 @@ header {
     background: #080b18; /* Solid background */
 }
 
-/* 3. Main Container (Tanpa Flex agar layout lain tidak rusak) */
+/* 3. Main Container */
 main {
     position: relative;
     z-index: 10; 
@@ -207,16 +207,7 @@ main {
     box-sizing: border-box;
 }
 
-/* 4. LAYOUT KHUSUS LOGIN TENGAH (Menggunakan Flexbox) */
-.auth-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 70vh; /* Menempatkan tepat di tengah layar secara vertikal */
-    width: 100%;
-}
-
-/* 5. Panel / Tabel 100% PEKAT (Solid) */
+/* 4. Panel / Tabel 100% PEKAT (Solid) */
 .panel, .stat {
     background: #11182b; 
     border: 2px solid var(--line);
@@ -230,7 +221,7 @@ main {
     box-sizing: border-box;
 }
 
-/* 6. Menu Dropdown 100% PEKAT */
+/* 5. Menu Dropdown 100% PEKAT */
 .menu-dropdown {
     display: none;
     position: absolute;
@@ -463,7 +454,8 @@ def setup():
             db().commit()
             flash("Admin berhasil dibuat. Silakan login.")
             return redirect(url_for("login"))
-    body = """<div class="auth-container"><div class="panel" style="max-width:400px; width:100%;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
+    # FIXED POSITION CENTER
+    body = """<div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 400px;"><div class="panel" style="width: 100%; margin: 0;"><h1>Pengaturan awal</h1><p class="muted">Buat akun admin pertama.</p>
     <form method="post"><label>Username admin</label><input name="username" required minlength="3">
     <label>Nama tampilan</label><input name="display_name">
     <label>Kata sandi (minimal 12 karakter)</label><input type="password" name="password" required minlength="12">
@@ -481,8 +473,8 @@ def login():
             return redirect(url_for("dashboard"))
         flash("Username atau kata sandi tidak cocok.")
     
-    # PENGGUNAAN AUTH-CONTAINER UNTUK MENENGAHKAN KOTAK
-    body = """<div class="auth-container"><div class="panel" style="max-width:350px; width:100%;"><h1 style="text-align:center;">LOGIN</h1>
+    # FIXED POSITION CENTER
+    body = """<div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 350px;"><div class="panel" style="width: 100%; margin: 0;"><h1 style="text-align:center;">LOGIN</h1>
     <form method="post"><label>Username</label><input name="username" required>
     <label>Kata sandi</label><input type="password" name="password" required>
     <button>Masuk</button></form>
@@ -511,7 +503,8 @@ def register():
             except sqlite3.IntegrityError:
                 flash("Username sudah digunakan. Silakan pilih yang lain.")
                 
-    body = """<div class="auth-container"><div class="panel" style="max-width:380px; width:100%;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
+    # FIXED POSITION CENTER
+    body = """<div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 380px;"><div class="panel" style="width: 100%; margin: 0;"><h1 style="text-align:center;">DAFTAR AKUN</h1>
     <p class="muted" style="text-align:center;">Buat akun untuk mulai mencatat keuanganmu.</p>
     <form method="post">
         <label>Username</label><input name="username" required minlength="3">
@@ -723,25 +716,25 @@ def profile():
         return redirect(url_for("profile"))
         
     body = """
-    <div class="auth-container" style="min-height:auto; margin-top:20px;">
-    <div class="panel" style="text-align:center; position:relative; max-width: 500px; width: 100%;">
-        <div class="avatar-container">
-            {% if user.photo %}
-                <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
-            {% else %}
-                <div class="avatar" style="background:#243454; display:flex; align-items:center; justify-content:center; margin:0 auto;">👤</div>
-            {% endif %}
-            <a href="#" class="edit-icon" onclick="document.getElementById('photoForm').style.display='block';">✏️</a>
+    <div style="display: flex; justify-content: center; margin-top: 20px;">
+        <div class="panel" style="text-align:center; position:relative; max-width: 500px; width: 100%;">
+            <div class="avatar-container">
+                {% if user.photo %}
+                    <img class="avatar" src="/static_uploads/{{user.photo}}" alt="Foto">
+                {% else %}
+                    <div class="avatar" style="background:#243454; display:flex; align-items:center; justify-content:center; margin:0 auto;">👤</div>
+                {% endif %}
+                <a href="#" class="edit-icon" onclick="document.getElementById('photoForm').style.display='block';">✏️</a>
+            </div>
+            
+            <h1 style="margin-top:10px;">{{user.display_name}} <a href="#" style="font-size:14px;text-decoration:none;" onclick="document.getElementById('credForm').style.display='block';">✏️</a></h1>
+            <p class="muted" style="margin-bottom:15px;">@{{user.username}}</p>
+            
+            <div style="background:#0a1020;padding:15px;border-radius:10px;border:1px solid #344665;text-align:left;">
+                <b>Bio:</b> <span class="muted">{{user.bio if user.bio else 'Belum ada bio.'}}</span> 
+                <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
+            </div>
         </div>
-        
-        <h1 style="margin-top:10px;">{{user.display_name}} <a href="#" style="font-size:14px;text-decoration:none;" onclick="document.getElementById('credForm').style.display='block';">✏️</a></h1>
-        <p class="muted" style="margin-bottom:15px;">@{{user.username}}</p>
-        
-        <div style="background:#0a1020;padding:15px;border-radius:10px;border:1px solid #344665;text-align:left;">
-            <b>Bio:</b> <span class="muted">{{user.bio if user.bio else 'Belum ada bio.'}}</span> 
-            <a href="#" style="font-size:12px;text-decoration:none;float:right;" onclick="document.getElementById('bioForm').style.display='block';">✏️ Edit</a>
-        </div>
-    </div>
     </div>
 
     <div id="photoForm" class="panel" style="display:none; max-width: 500px; margin: 0 auto 16px auto;">
