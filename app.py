@@ -1,9 +1,11 @@
 import os
 import sqlite3
 import json
+import csv
+import io
 from functools import wraps
 from datetime import date, datetime
-from flask import Flask, g, request, redirect, url_for, session, flash, render_template_string, get_flashed_messages, send_from_directory
+from flask import Flask, g, request, redirect, url_for, session, flash, render_template_string, get_flashed_messages, send_from_directory, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -71,6 +73,31 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
     
+    # --- TABEL BARU UNTUK BENDAHARA ORGANISASI ---
+    conn.execute("""CREATE TABLE IF NOT EXISTS org_cash (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        entry_date TEXT NOT NULL,
+        recorded_by TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS kas_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        position TEXT NOT NULL,
+        amount REAL NOT NULL,
+        entry_date TEXT NOT NULL
+    )""")
+    # Tabel Rekap Mahasiswa per Angkatan
+    conn.execute("""CREATE TABLE IF NOT EXISTS students (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        batch_year TEXT NOT NULL,
+        position TEXT NOT NULL,
+        campus TEXT NOT NULL
+    )""")
+
     try:
         conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
     except sqlite3.OperationalError:
@@ -116,6 +143,18 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def bendahara_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user:
+            return redirect(url_for("login"))
+        if user["role"] not in ["admin", "bendahara"]:
+            flash("Halaman ini khusus Admin dan Bendahara.")
+            return redirect(url_for("dashboard"))
+        return fn(*args, **kwargs)
+    return wrapper
+
 def auto_evaluate_trading(plan, result, notes):
     plan = plan or ""
     result = result or ""
@@ -155,7 +194,6 @@ TEMPLATE = r"""
 <!doctype html><html lang="id"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ title }} • AlZzz Web</title>
-<!-- Load Chart.js untuk Grafik -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{--bg:#080b18;--panel:#11182b;--line:#243454;--cyan:#42e8ff;--pink:#ff4fd8;--text:#eaf3ff;--muted:#9aabc5}
@@ -190,7 +228,7 @@ main {
 .menu-dropdown {
     display: none; position: absolute; top: 60px; right: 5%;
     background: #11182b; border: 1px solid var(--line); border-radius: 10px;
-    padding: 10px; z-index: 999; box-shadow: 0 10px 30px rgba(0,0,0,0.9); min-width: 200px;
+    padding: 10px; z-index: 999; box-shadow: 0 10px 30px rgba(0,0,0,0.9); min-width: 220px;
 }
 
 @keyframes neon-glow {
@@ -224,7 +262,6 @@ button:hover{filter:brightness(1.2)}
 label{display:block;color:var(--muted);margin-top:8px}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
 
-/* TABEL STYLING */
 .table-responsive { width: 100%; overflow-x: auto; }
 table{width:100%;border-collapse:collapse;} 
 td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap; font-size: 14px;}
@@ -238,12 +275,11 @@ th{color:var(--cyan)}
 
 .music-btn {background: var(--pink); color: white; border: none; padding: 5px 10px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: bold; box-shadow: 0 0 10px var(--pink); width: auto; margin: 0;}
 
-/* BUTTONS */
 .btn-edit { background: #f39c12; color: white; padding: 6px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; display:inline-block; margin-right: 5px; width: auto;}
 .btn-delete { background: #e74c3c; color: white; padding: 6px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; display:inline-block; width: auto;}
 .btn-add { background: #00ff88; color: #000; padding: 10px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; display:inline-block; width: auto; margin-bottom: 15px;}
+.btn-excel { background: #1D6F42; color: white; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-weight: bold; display:inline-block; width: auto; border: none; cursor: pointer; margin-bottom: 10px;}
 
-/* KHUSUS HALAMAN LOGIN (RATA TENGAH) */
 main.auth-main {
     display: flex; flex-direction: column; justify-content: center; align-items: center;
     min-height: calc(100vh - 160px); width: 100%;
@@ -267,12 +303,20 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
   {% if user %}
   <div class="hamburger" onclick="var m = document.getElementById('myMenu'); m.style.display = (m.style.display === 'block') ? 'none' : 'block';">☰</div>
   <div id="myMenu" class="menu-dropdown">
-      <a href="{{url_for('dashboard')}}">Dashboard</a>
+      <a href="{{url_for('dashboard')}}">Dashboard Pribadi</a>
       <a href="{{url_for('profile')}}">Profil</a>
-      <a href="{{url_for('transactions')}}">Keuangan</a>
-      <a href="{{url_for('journal_page')}}">Trading</a>
+      <a href="{{url_for('transactions')}}">Keuangan Pribadi</a>
+      <a href="{{url_for('journal_page')}}">Jurnal Trading</a>
       <a href="{{url_for('evaluation_page')}}">Evaluasi</a>
-      {% if user.role=='admin' %}<a href="{{url_for('admin_page')}}">Admin Panel</a>{% endif %}
+      
+      {% if user.role in ['admin', 'bendahara'] %}
+      <a href="{{url_for('bendahara_dashboard')}}" style="color:var(--cyan); font-weight:bold;">🏦 Bendahara Organisasi</a>
+      {% endif %}
+      
+      {% if user.role=='admin' %}
+      <a href="{{url_for('admin_page')}}">Admin Panel</a>
+      {% endif %}
+      
       <a href="{{url_for('logout')}}" style="color:var(--pink);">Keluar</a>
   </div>
   {% else %}
@@ -288,7 +332,6 @@ footer{text-align:center;color:var(--muted);padding:30px; position: relative; z-
 <div id="yt-player" style="display:none;"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    // --- LOGIKA BACKGROUND & MUSIC ---
     const canvas = document.getElementById('bg-graph');
     const ctx = canvas.getContext('2d');
     let width, height, time = 0;
@@ -444,7 +487,7 @@ def dashboard():
     chart_data_json = json.dumps(chart_data)
 
     body = f"""
-    <h1>Dashboard</h1>
+    <h1>Dashboard Pribadi</h1>
     <p class="muted" style="margin-bottom: 20px;">Selamat datang kembali, <strong>{user['display_name']}</strong>!</p>
 
     <div class="grid">
@@ -530,10 +573,25 @@ def transactions():
         db().execute("INSERT INTO transactions (user_id, kind, category, amount, description, entry_date) VALUES (?, ?, ?, ?, ?, ?)", (session["user_id"], kind, category, amount, description + " | " + advice, date.today().isoformat()))
         db().commit(); flash("Transaksi berhasil dicatat!"); return redirect(url_for("transactions"))
 
-    txs = db().execute("SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
-    rows = "".join([f"<tr><td>{t['entry_date']}</td><td>{t['kind']}</td><td>{t['category']}</td><td>{t['amount']}</td><td>{t['description']}</td></tr>" for t in txs])
+    # Filter Berdasarkan Bulan
+    selected_month = request.args.get("month", date.today().strftime("%Y-%m"))
+    txs = db().execute("SELECT * FROM transactions WHERE user_id=? AND entry_date LIKE ? ORDER BY id DESC", (session["user_id"], f"{selected_month}%")).fetchall()
+    rows = "".join([f"<tr><td>{t['entry_date']}</td><td>{t['kind']}</td><td>{t['category']}</td><td>Rp {t['amount']:,.0f}</td><td>{t['description']}</td></tr>" for t in txs])
     
-    body = f"""<div class="panel"><h2>Catatan Keuangan</h2>
+    body = f"""<div class="panel"><h2>Catatan Keuangan Pribadi</h2>
+    <div class="row" style="align-items: end;">
+        <div>
+            <label>Filter Rekap Bulan:</label>
+            <input type="month" value="{selected_month}" onchange="window.location.href='?month=' + this.value">
+        </div>
+        <div>
+            <a href="/export/transactions?month={selected_month}" class="btn-excel">⬇️ Download Rekap Bulan Ini (Excel)</a>
+        </div>
+    </div>
+    
+    <hr style="border-color: var(--line); margin: 20px 0;">
+
+    <h2>Tambah Transaksi Baru</h2>
     <form method="post" class="row">
         <select name="kind"><option>Pemasukan</option><option>Pengeluaran</option></select>
         <input name="category" placeholder="Kategori (cth: Makanan)" required>
@@ -541,7 +599,9 @@ def transactions():
         <input name="description" placeholder="Keterangan">
         <button>Tambah</button>
     </form>
-    <div class="table-responsive" style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th><th>Keterangan</th></tr>{rows}</table></div>
+    <div class="table-responsive" style="margin-top:20px;">
+        <table><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Jumlah</th><th>Keterangan</th></tr>{rows}</table>
+    </div>
     </div>"""
     return page("Keuangan", body)
 
@@ -558,10 +618,25 @@ def journal_page():
         db().execute("INSERT INTO journal (user_id, symbol, plan, result, notes, entry_date) VALUES (?, ?, ?, ?, ?, ?)", (session["user_id"], symbol, plan, result, notes + " | " + advice, date.today().isoformat()))
         db().commit(); flash("Jurnal trading berhasil ditambahkan!"); return redirect(url_for("journal_page"))
 
-    js = db().execute("SELECT * FROM journal WHERE user_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
+    # Filter Berdasarkan Bulan
+    selected_month = request.args.get("month", date.today().strftime("%Y-%m"))
+    js = db().execute("SELECT * FROM journal WHERE user_id=? AND entry_date LIKE ? ORDER BY id DESC", (session["user_id"], f"{selected_month}%")).fetchall()
     rows = "".join([f"<tr><td>{j['entry_date']}</td><td>{j['symbol']}</td><td>{j['plan']}</td><td>{j['result']}</td></tr>" for j in js])
 
     body = f"""<div class="panel"><h2>Jurnal Trading</h2>
+    <div class="row" style="align-items: end;">
+        <div>
+            <label>Filter Rekap Bulan:</label>
+            <input type="month" value="{selected_month}" onchange="window.location.href='?month=' + this.value">
+        </div>
+        <div>
+            <a href="/export/journal?month={selected_month}" class="btn-excel">⬇️ Download Rekap Bulan Ini (Excel)</a>
+        </div>
+    </div>
+    
+    <hr style="border-color: var(--line); margin: 20px 0;">
+
+    <h2>Tambah Jurnal Baru</h2>
     <form method="post" class="row">
         <input name="symbol" placeholder="Pair (cth: BTCUSD)" required>
         <input name="plan" placeholder="Rencana" required>
@@ -569,10 +644,263 @@ def journal_page():
         <input name="notes" placeholder="Catatan">
         <button>Simpan</button>
     </form>
-    <div class="table-responsive" style="margin-top:20px;"><table><tr><th>Tanggal</th><th>Pair</th><th>Plan</th><th>Hasil</th></tr>{rows}</table></div>
+    <div class="table-responsive" style="margin-top:20px;">
+        <table><tr><th>Tanggal</th><th>Pair</th><th>Plan</th><th>Hasil</th></tr>{rows}</table>
+    </div>
     </div>"""
     return page("Trading", body)
 
+# ================= ROUTES EXPORT EXCEL (CSV) =================
+@app.route('/export/transactions')
+@login_required
+def export_transactions():
+    selected_month = request.args.get("month", date.today().strftime("%Y-%m"))
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Tanggal', 'Jenis', 'Kategori', 'Jumlah', 'Keterangan'])
+    txs = db().execute("SELECT * FROM transactions WHERE user_id=? AND entry_date LIKE ? ORDER BY entry_date ASC", (session["user_id"], f"{selected_month}%")).fetchall()
+    for t in txs:
+        cw.writerow([t['entry_date'], t['kind'], t['category'], t['amount'], t['description']])
+    
+    filename = f"Laporan_Keuangan_{selected_month}.csv"
+    return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+@app.route('/export/journal')
+@login_required
+def export_journal():
+    selected_month = request.args.get("month", date.today().strftime("%Y-%m"))
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Tanggal', 'Pair', 'Rencana', 'Hasil', 'Catatan'])
+    js = db().execute("SELECT * FROM journal WHERE user_id=? AND entry_date LIKE ? ORDER BY entry_date ASC", (session["user_id"], f"{selected_month}%")).fetchall()
+    for j in js:
+        cw.writerow([j['entry_date'], j['symbol'], j['plan'], j['result'], j['notes']])
+    
+    filename = f"Jurnal_Trading_{selected_month}.csv"
+    return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+@app.route('/export/kas_members')
+@bendahara_required
+def export_kas_members():
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Tanggal', 'Nama', 'Jabatan', 'Nominal Iuran'])
+    kas = db().execute("SELECT * FROM kas_members ORDER BY id ASC").fetchall()
+    for k in kas:
+        cw.writerow([k['entry_date'], k['name'], k['position'], k['amount']])
+    
+    return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=Database_Iuran_Kas_Pengurus.csv"})
+
+@app.route('/export/org_cash')
+@bendahara_required
+def export_org_cash():
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Tanggal', 'Jenis Kas', 'Nominal', 'Keterangan', 'Dicatat Oleh'])
+    cash = db().execute("SELECT * FROM org_cash ORDER BY id ASC").fetchall()
+    for c in cash:
+        cw.writerow([c['entry_date'], c['type'], c['amount'], c['description'], c['recorded_by']])
+    
+    return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=Database_Kas_Organisasi.csv"})
+
+@app.route('/export/students')
+@bendahara_required
+def export_students():
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Nama', 'Angkatan', 'Jabatan Organisasi', 'Asal Kampus'])
+    students = db().execute("SELECT * FROM students ORDER BY batch_year ASC, name ASC").fetchall()
+    for s in students:
+        cw.writerow([s['name'], s['batch_year'], s['position'], s['campus']])
+    
+    return Response(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=Rekap_Mahasiswa_Per_Angkatan.csv"})
+
+
+# ================= BENDAHARA DASHBOARD =================
+@app.route("/bendahara", methods=["GET", "POST"])
+@bendahara_required
+def bendahara_dashboard():
+    user = current_user()
+    
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        # Tambah Iuran Kas (Khusus Pengurus)
+        if action == "tambah_kas_member":
+            name = request.form.get("name")
+            position = request.form.get("position")
+            amount = request.form.get("amount")
+            db().execute("INSERT INTO kas_members (name, position, amount, entry_date) VALUES (?, ?, ?, ?)",
+                         (name, position, amount, date.today().isoformat()))
+            db().commit()
+            flash("Iuran Kas Pengurus berhasil ditambahkan!")
+            
+        # Tambah Kas Organisasi Umum
+        elif action == "tambah_org_cash":
+            type_cash = request.form.get("type_cash")
+            amount = request.form.get("amount")
+            description = request.form.get("description")
+            db().execute("INSERT INTO org_cash (type, amount, description, entry_date, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                         (type_cash, amount, description, date.today().isoformat(), user["display_name"]))
+            db().commit()
+            flash("Data Kas Organisasi berhasil ditambahkan!")
+
+        # Tambah Mahasiswa (Rekap Angkatan)
+        elif action == "tambah_student":
+            name = request.form.get("name")
+            batch_year = request.form.get("batch_year")
+            position = request.form.get("position")
+            campus = request.form.get("campus")
+            db().execute("INSERT INTO students (name, batch_year, position, campus) VALUES (?, ?, ?, ?)",
+                         (name, batch_year, position, campus))
+            db().commit()
+            flash("Data Mahasiswa berhasil ditambahkan ke Rekap!")
+            
+        return redirect(url_for("bendahara_dashboard"))
+        
+    # Hitung Total
+    total_kas = db().execute("SELECT COALESCE(SUM(amount), 0) FROM kas_members").fetchone()[0]
+    total_sponsor = db().execute("SELECT COALESCE(SUM(amount), 0) FROM org_cash WHERE type='Sponsorship'").fetchone()[0]
+    total_kegiatan = db().execute("SELECT COALESCE(SUM(amount), 0) FROM org_cash WHERE type='Iuran Kegiatan'").fetchone()[0]
+    total_pengeluaran = db().execute("SELECT COALESCE(SUM(amount), 0) FROM org_cash WHERE type='Pengeluaran'").fetchone()[0]
+    total_pemasukan_lain = db().execute("SELECT COALESCE(SUM(amount), 0) FROM org_cash WHERE type='Pemasukan Lain'").fetchone()[0]
+    
+    saldo_kas_organisasi = total_kas + total_sponsor + total_kegiatan + total_pemasukan_lain - total_pengeluaran
+
+    # Ambil Data untuk Tabel
+    kas_members = db().execute("SELECT * FROM kas_members ORDER BY id DESC LIMIT 10").fetchall()
+    org_cash = db().execute("SELECT * FROM org_cash ORDER BY id DESC LIMIT 10").fetchall()
+    students = db().execute("SELECT * FROM students ORDER BY batch_year ASC, name ASC").fetchall()
+
+    rows_kas = "".join([f"<tr><td>{k['entry_date']}</td><td>{k['name']}</td><td>{k['position']}</td><td>Rp {k['amount']:,.0f}</td></tr>" for k in kas_members])
+    rows_cash = "".join([f"<tr><td>{c['entry_date']}</td><td>{c['type']}</td><td>Rp {c['amount']:,.0f}</td><td>{c['description']}</td><td>{c['recorded_by']}</td></tr>" for c in org_cash])
+    rows_students = "".join([f"<tr><td>{s['name']}</td><td>{s['batch_year']}</td><td>{s['position']}</td><td>{s['campus']}</td></tr>" for s in students])
+
+    body = f"""
+    <h1>🏦 Dashboard Bendahara Organisasi</h1>
+    <p class="muted" style="margin-bottom: 20px;">Selamat bertugas, <strong>{user['display_name']}</strong>!</p>
+
+    <!-- Ringkasan Saldo -->
+    <div class="grid">
+        <div class="stat">
+            <small>Saldo Kas Organisasi (Bersih)</small>
+            <strong style="color: var(--cyan); font-size: 26px;">Rp {saldo_kas_organisasi:,.0f}</strong>
+        </div>
+        <div class="stat">
+            <small>Sponsorship Masuk</small>
+            <strong style="color: #00ff88;">Rp {total_sponsor:,.0f}</strong>
+        </div>
+        <div class="stat">
+            <small>Iuran Kegiatan</small>
+            <strong style="color: #00ff88;">Rp {total_kegiatan:,.0f}</strong>
+        </div>
+        <div class="stat">
+            <small>Total Pengeluaran</small>
+            <strong style="color: #ff4f4f;">Rp {total_pengeluaran:,.0f}</strong>
+        </div>
+    </div>
+
+    <!-- FORM INPUT -->
+    <div class="row" style="align-items: start; margin-top: 20px;">
+        <!-- Form Iuran Kas (Khusus Pengurus) -->
+        <div class="panel">
+            <h2>➕ Tambah Iuran Kas (Pengurus)</h2>
+            <form method="post">
+                <input type="hidden" name="action" value="tambah_kas_member">
+                <label>Nama Pengurus</label>
+                <input name="name" placeholder="Nama Lengkap" required>
+                <label>Jabatan Organisasi</label>
+                <input name="position" placeholder="Contoh: Ketua / Sekretaris" required>
+                <label>Nominal Iuran (Rp)</label>
+                <input type="number" name="amount" placeholder="Contoh: 50000" required>
+                <button>Simpan Iuran Pengurus</button>
+            </form>
+        </div>
+
+        <!-- Form Kas Organisasi Umum -->
+        <div class="panel">
+            <h2>➕ Tambah Kas / Pemasukan / Pengeluaran</h2>
+            <form method="post">
+                <input type="hidden" name="action" value="tambah_org_cash">
+                <label>Jenis Kas</label>
+                <select name="type_cash" required>
+                    <option value="Sponsorship">Pemasukan Sponsorship</option>
+                    <option value="Iuran Kegiatan">Pemasukan Iuran Kegiatan</option>
+                    <option value="Pemasukan Lain">Pemasukan Kas Lainnya</option>
+                    <option value="Pengeluaran">Pengeluaran Organisasi</option>
+                </select>
+                <label>Nominal (Rp)</label>
+                <input type="number" name="amount" placeholder="Jumlah Uang" required>
+                <label>Keterangan / Deskripsi</label>
+                <input name="description" placeholder="Contoh: Sponsor dari Toko A" required>
+                <button>Simpan Data Kas</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="row" style="align-items: start;">
+        <!-- Form Rekap Mahasiswa per Angkatan -->
+        <div class="panel">
+            <h2>➕ Tambah Rekap Mahasiswa</h2>
+            <form method="post">
+                <input type="hidden" name="action" value="tambah_student">
+                <label>Nama Mahasiswa</label>
+                <input name="name" placeholder="Nama Lengkap" required>
+                <label>Angkatan Masuk Kuliah</label>
+                <input name="batch_year" placeholder="Contoh: 2023" required>
+                <label>Jabatan Organisasi</label>
+                <input name="position" placeholder="Contoh: Anggota / MABA" required>
+                <label>Asal Kampus</label>
+                <input name="campus" placeholder="Contoh: Universitas Indonesia" required>
+                <button>Simpan Rekap Mahasiswa</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- TABEL DATA & EXPORT -->
+    <div class="panel" style="margin-top: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+            <h2 style="margin:0;">🎓 Rekap Mahasiswa per Angkatan</h2>
+            <a href="/export/students" class="btn-excel" style="margin:0;">⬇️ Download Database Mahasiswa</a>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <tr><th>Nama Mahasiswa</th><th>Angkatan</th><th>Jabatan Organisasi</th><th>Asal Kampus</th></tr>
+                {rows_students}
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+            <h2 style="margin:0;">📋 Riwayat Iuran Kas Pengurus</h2>
+            <a href="/export/kas_members" class="btn-excel" style="margin:0;">⬇️ Download Database Iuran</a>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <tr><th>Tanggal</th><th>Nama</th><th>Jabatan</th><th>Nominal</th></tr>
+                {rows_kas}
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+            <h2 style="margin:0;">💵 Riwayat Kas Organisasi</h2>
+            <a href="/export/org_cash" class="btn-excel" style="margin:0;">⬇️ Download Database Kas</a>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <tr><th>Tanggal</th><th>Jenis Kas</th><th>Nominal</th><th>Keterangan</th><th>Dicatat Oleh</th></tr>
+                {rows_cash}
+            </table>
+        </div>
+    </div>
+    """
+    return page("Bendahara", body)
+
+
+# --- ROUTE ADMIN LAMA (TETAP ADA) ---
 @app.route("/evaluation")
 @login_required
 def evaluation_page():
@@ -617,12 +945,9 @@ def profile():
     </form></div>"""
     return page("Profil", body)
 
-# --- ROUTE ADMIN (CRUD & FINANCE MONITORING) ---
-
 @app.route("/admin")
 @admin_required
 def admin_page():
-    # Mengambil semua user beserta total pemasukan dan pengeluaran mereka
     users = db().execute("""
         SELECT u.*, 
                (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = u.id AND kind = 'Pemasukan') as total_income,
@@ -632,17 +957,12 @@ def admin_page():
     
     rows = ""
     for u in users:
-        # Format angka
         income_fmt = f"Rp {u['total_income']:,.0f}"
         expense_fmt = f"Rp {u['total_expense']:,.0f}"
         
-        # Tombol aksi (Edit & Hapus)
-        actions = f"""
-        <a href="{url_for('admin_edit', user_id=u['id'])}" class="btn-edit">Edit</a>
-        """
-        # Cegah admin menghapus dirinya sendiri
+        actions = f"""<a href="{url_for('admin_edit', user_id=u['id'])}" class="btn-edit">Edit</a>"""
         if u['id'] != current_user()['id']:
-            actions += f"""<a href="{url_for('admin_delete', user_id=u['id'])}" class="btn-delete" onclick="return confirm('Yakin ingin menghapus member ini? Semua data transaksinya akan hilang.')">Hapus</a>"""
+            actions += f"""<a href="{url_for('admin_delete', user_id=u['id'])}" class="btn-delete" onclick="return confirm('Yakin ingin menghapus member ini?')">Hapus</a>"""
             
         rows += f"""
         <tr>
@@ -663,10 +983,7 @@ def admin_page():
     </div>
     <div class="table-responsive">
         <table>
-            <tr>
-                <th>ID</th><th>Username</th><th>Nama Tampilan</th>
-                <th>Role</th><th>Pemasukan</th><th>Pengeluaran</th><th>Aksi</th>
-            </tr>
+            <tr><th>ID</th><th>Username</th><th>Nama</th><th>Role</th><th>Pemasukan</th><th>Pengeluaran</th><th>Aksi</th></tr>
             {rows}
         </table>
     </div>
@@ -682,17 +999,13 @@ def admin_add():
         password = request.form.get("password", "")
         role = request.form.get("role", "member")
         
-        if len(username) < 3 or len(password) < 12:
-            flash("Username min 3 karakter, password min 12 karakter.")
+        if len(username) < 3 or len(password) < 12: flash("Username min 3 karakter, password min 12 karakter.")
         else:
             try:
                 db().execute("INSERT INTO users(username,password_hash,role,display_name) VALUES(?,?,?,?)", 
                              (username, generate_password_hash(password), role, display))
-                db().commit()
-                flash("Member berhasil ditambahkan!")
-                return redirect(url_for("admin_page"))
-            except sqlite3.IntegrityError:
-                flash("Username sudah digunakan.")
+                db().commit(); flash("Member berhasil ditambahkan!"); return redirect(url_for("admin_page"))
+            except sqlite3.IntegrityError: flash("Username sudah digunakan.")
                 
     body = """<div class="panel" style="max-width:400px; margin: 0 auto;">
     <h2>Tambah Member Baru</h2>
@@ -700,10 +1013,11 @@ def admin_add():
         <label>Username</label><input name="username" required minlength="3">
         <label>Nama Tampilan</label><input name="display_name">
         <label>Kata Sandi (min 12 karakter)</label><input type="password" name="password" required minlength="12">
-        <label>Role</label>
+        <label>Role / Jabatan Sistem</label>
         <select name="role">
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
+            <option value="member">Member (Biasa)</option>
+            <option value="bendahara">Bendahara Organisasi</option>
+            <option value="admin">Admin (Full Akses)</option>
         </select>
         <button style="margin-top:20px;">Simpan Member</button>
         <a href="{0}" style="display:block; text-align:center; margin-top:15px; color:var(--muted); text-decoration:none;">Batal</a>
@@ -714,9 +1028,7 @@ def admin_add():
 @admin_required
 def admin_edit(user_id):
     user = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    if not user:
-        flash("User tidak ditemukan.")
-        return redirect(url_for("admin_page"))
+    if not user: flash("User tidak ditemukan."); return redirect(url_for("admin_page"))
         
     if request.method == "POST":
         display = request.form.get("display_name")
@@ -724,18 +1036,17 @@ def admin_edit(user_id):
         bio = request.form.get("bio", "")
         
         db().execute("UPDATE users SET display_name=?, role=?, bio=? WHERE id=?", (display, role, bio, user_id))
-        db().commit()
-        flash("Data member berhasil diperbarui!")
-        return redirect(url_for("admin_page"))
+        db().commit(); flash("Data member berhasil diperbarui!"); return redirect(url_for("admin_page"))
         
     body = f"""<div class="panel" style="max-width:400px; margin: 0 auto;">
     <h2>Edit Member: {user['username']}</h2>
     <form method="post">
         <label>Nama Tampilan</label><input name="display_name" value="{user['display_name']}">
-        <label>Role</label>
+        <label>Role / Jabatan Sistem</label>
         <select name="role">
-            <option value="member" {'selected' if user['role']=='member' else ''}>Member</option>
-            <option value="admin" {'selected' if user['role']=='admin' else ''}>Admin</option>
+            <option value="member" {'selected' if user['role']=='member' else ''}>Member (Biasa)</option>
+            <option value="bendahara" {'selected' if user['role']=='bendahara' else ''}>Bendahara Organisasi</option>
+            <option value="admin" {'selected' if user['role']=='admin' else ''}>Admin (Full Akses)</option>
         </select>
         <label>Bio</label><textarea name="bio">{user['bio'] or ''}</textarea>
         <button style="margin-top:20px;">Simpan Perubahan</button>
@@ -746,19 +1057,12 @@ def admin_edit(user_id):
 @app.route("/admin/delete/<int:user_id>")
 @admin_required
 def admin_delete(user_id):
-    if user_id == current_user()['id']:
-        flash("Anda tidak bisa menghapus akun Anda sendiri!")
-        return redirect(url_for("admin_page"))
+    if user_id == current_user()['id']: flash("Anda tidak bisa menghapus akun Anda sendiri!"); return redirect(url_for("admin_page"))
         
-    # Hapus transaksi & jurnal terlebih dahulu (mencegah error foreign key)
     db().execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
     db().execute("DELETE FROM journal WHERE user_id=?", (user_id,))
-    # Hapus user
     db().execute("DELETE FROM users WHERE id=?", (user_id,))
-    db().commit()
-    
-    flash("Member berhasil dihapus.")
-    return redirect(url_for("admin_page"))
+    db().commit(); flash("Member berhasil dihapus."); return redirect(url_for("admin_page"))
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
